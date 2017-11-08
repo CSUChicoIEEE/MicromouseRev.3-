@@ -8,6 +8,7 @@
 #include "main.h"
 #include <vector>
 #include "stm32l4xx_hal.h"
+using namespace std;
 
 /* Private variables ---------------------------------------------------------*/
 #define MAP_SIZE 16
@@ -55,7 +56,7 @@ struct analogValues {
 
 analogValues analog1;
 
-vector<MovementVector> moveStack;
+vector<movementVector> moveStack;
 
 enum Movement {noMove,forward,turnRight,turnLeft,turnAround};
 
@@ -78,6 +79,7 @@ static void exeMoveVector(void);
 static void waitForButton(void);
 static void mapCell(void);
 static int checkMapComplete(void);
+static void analogRead(void);
 /***********************************************************************************
 **                                   MAIN                                         **
 ***********************************************************************************/
@@ -154,7 +156,7 @@ Status     :  Complete, works as intended for the current implementation
 ***********************************************************************************/
 void mapCell(void)
 {
-	if(MAP[mapXpos][mapYpos]&0x10==0x10) //if current map position has not been mapped
+	if((MAP[mapXpos][mapYpos]&0x10)==0x10) //if current map position has not been mapped
 	{ 
 		MAP[mapXpos][mapYpos]|=0x10;
 		analogRead();
@@ -248,7 +250,7 @@ Outputs    :  None
 
 Status     :  Mostly Complete, needs movement control system code
 ***********************************************************************************/
-void exeMoveVector(void);
+void exeMoveVector(void)
 {
 	movementVector currentMove;
 	
@@ -388,7 +390,7 @@ Outputs    :  None
 
 Status     :  Complete
 ***********************************************************************************/
-void resetEnCounts();
+void resetEnCounts()
 {
 	enCountRight = 0;
 	enCountLeft = 0;
