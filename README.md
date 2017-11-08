@@ -1,6 +1,14 @@
 # MicromouseRev.3-
 CSUChico IEEE MicroMouse Code
 
+IMPORTANT INFO FOR CONVERTING YOUR KIEL TO A C++ COMPILER
+1. Open "Options for Target" menu (there is a button on the task bar that looks like a wand with a circuit)
+2. Open the "C/C++" tab in that menu
+3. On the bottom of that tab there are 3 lines you can fill in. The middle one labeled "Misc Controls" should say
+   something like "--C99". Change this to "--cpp". 
+4. Your compiler is now compiling C++. Congrats.
+
+
 PINOUT FOR THE STM32L432KC EVAL BOARD
 
  1 *   USB   * 30
