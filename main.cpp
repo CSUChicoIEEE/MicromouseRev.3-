@@ -48,11 +48,11 @@ struct movementVector {
 };
 
 struct analogValues {
-	uint16_t rightBackIRVal;
-	uint16_t rightFrontIRVal;
-	uint16_t middleIRVal;
-	uint16_t leftFrontIRVal;
-	uint16_t leftBackIRVal;
+	volatile uint16_t rightBackIRVal;
+	volatile uint16_t rightFrontIRVal;
+	volatile uint16_t middleIRVal;
+	volatile uint16_t leftFrontIRVal;
+	volatile uint16_t leftBackIRVal;
 };
 
 analogValues analog1;
@@ -483,41 +483,123 @@ Description:  Configures the analog pins and starts the ADC
 Inputs     :  None
 Outputs    :  None
 
-Status     :  Probably works? Auto-generated code
+Status     :  Works!
 ***********************************************************************************/
 static void ADC1_Init(void)
 {
-
+	GPIO_InitTypeDef GPIO_InitStruct;
   ADC_ChannelConfTypeDef sConfig;
-
-    //Common config
-  hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
-  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-  hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 1;
+	
+	// Enable clock for GPIOA
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	
+	// Enable ADC Clock
+	__HAL_RCC_ADC_CLK_ENABLE();
+	
+	// ADC Periph interface clock configuration
+  __HAL_RCC_ADC_CONFIG(RCC_ADCCLKSOURCE_SYSCLK);
+	
+	// Configure GPIOA
+	GPIO_InitStruct.Pin   = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_3 |
+	                        GPIO_PIN_4 | GPIO_PIN_5;
+	GPIO_InitStruct.Mode  = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull  = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+	
+	/* Configure ADC1 */
+	hadc1.Instance = ADC1;
+	
+	// Reset peripheral
+	if(HAL_ADC_DeInit(&hadc1)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+  // Configure ADC settings
+  hadc1.Init.ClockPrescaler        = ADC_CLOCK_ASYNC_DIV1;
+  hadc1.Init.Resolution            = ADC_RESOLUTION_12B;
+  hadc1.Init.DataAlign             = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.ScanConvMode          = ADC_SCAN_ENABLE;       // Scan through all channels based on rank
+  hadc1.Init.EOCSelection          = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.LowPowerAutoWait      = DISABLE;
+  hadc1.Init.ContinuousConvMode    = ENABLE;
+  hadc1.Init.NbrOfConversion       = 5;                     // 5 channels to scan through
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfDiscConversion = 1;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.NbrOfDiscConversion   = 1;
+  hadc1.Init.ExternalTrigConv      = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc1.Init.DMAContinuousRequests = DISABLE;
-  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-  hadc1.Init.OversamplingMode = DISABLE;
-  HAL_ADC_Init(&hadc1);
+  hadc1.Init.Overrun               = ADC_OVR_DATA_OVERWRITTEN;
+  hadc1.Init.OversamplingMode      = DISABLE;
+  
+	if(HAL_ADC_Init(&hadc1)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
 
-    //Configure Regular Channel
-  sConfig.Channel = ADC_CHANNEL_5;
-  sConfig.Rank = 1;
+  //Configure Channel 5, PA0, IR_BL
+  sConfig.Channel      = ADC_CHANNEL_5;
+  sConfig.Rank         = ADC_REGULAR_RANK_1;       // scanning will be done in order
   sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
-  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.SingleDiff   = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
-  sConfig.Offset = 0;
-  HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-
+  sConfig.Offset       = 0;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 6, PA1, IR_FL
+  sConfig.Channel      = ADC_CHANNEL_6;
+  sConfig.Rank         = ADC_REGULAR_RANK_2;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 8, PA3, IR_M
+  sConfig.Channel      = ADC_CHANNEL_8;
+  sConfig.Rank         = ADC_REGULAR_RANK_3;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 9, PA4, IR_FR
+  sConfig.Channel      = ADC_CHANNEL_9;
+  sConfig.Rank         = ADC_REGULAR_RANK_4;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 10, PA5, IR_BR
+  sConfig.Channel      = ADC_CHANNEL_10;
+  sConfig.Rank         = ADC_REGULAR_RANK_5;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	/* Run the ADC calibration in single-ended mode */
+  if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
+  {
+    /* Calibration Error */
+    while(1){}
+  }
 }
 
 /***********************************************************************************
@@ -587,7 +669,7 @@ static void TIM1_Init(void)
   HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig);
 
 	//configures the Pins and starts the timer clock
-  HAL_TIM_MspPostInit(&htim1);
+  //HAL_TIM_MspPostInit(&htim1);
 	
 	//starts the timer
 	HAL_TIM_Base_Start(&htim1); 
@@ -671,11 +753,52 @@ Description:  Gets the analog values from each of the ADC channels and loads the
 Inputs     :  None
 Outputs    :  None
 
-Status     :  Not Started
+Status     :  Seems to work.  Could test if struct is properly populated.
+              How values are stored in the struct should also be looked at.
 ***********************************************************************************/
 static void analogRead(void)
 {
 	
+	/* Start the conversion process */
+  if (HAL_ADC_Start(&hadc1) != HAL_OK)
+  {
+    /* Start Conversation Error */
+    while(1){}
+  }
+	
+	/* Poll for conversions */
+	for(int conv_index = 0; conv_index < 5; conv_index++)
+	{
+		if(HAL_ADC_PollForConversion(&hadc1, 10) != HAL_OK)
+		{
+			/* loop if error occured*/
+			while(1){}
+		}
+		else
+		{
+			/* store converted value based on set rank in ADC1_Init */
+			switch(conv_index)
+			{
+				case 0:  analog1.leftBackIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 1:  analog1.leftFrontIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 2:  analog1.middleIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 3:  analog1.rightFrontIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 4:  analog1.rightBackIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+			}
+		}
+	}
+	
+	/* End conversion process */
+	if (HAL_ADC_Stop(&hadc1) != HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
 }
 
 /***********************************************************************************
