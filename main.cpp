@@ -1,5 +1,5 @@
 /*******************************************************************************
-  * File Name          : main.c
+  * File Name          : main.cpp
   * Description        : Main program body
   *****************************************************************************/
 
@@ -8,7 +8,6 @@
 #include "main.h"
 #include <vector>
 #include "stm32l4xx_hal.h"
-using namespace std;
 
 /* Private variables ---------------------------------------------------------*/
 #define MAP_SIZE 16
@@ -36,6 +35,8 @@ static uint8_t mapYpos;
 static uint8_t direction;
 static uint8_t defaultDir;
 
+enum Movement {noMove,forward,turnRight,turnLeft,turnAround};
+
 struct movementVector {
   uint8_t pwmR1;
   uint8_t pwmR2;
@@ -47,18 +48,16 @@ struct movementVector {
 };
 
 struct analogValues {
-	static uint16_t rightBackIRVal;
-	static uint16_t rightFrontIRVal;
-	static uint16_t middleIRVal;
-	static uint16_t leftFrontIRVal;
-	static uint16_t leftBackIRVal;
+	volatile uint16_t rightBackIRVal;
+	volatile uint16_t rightFrontIRVal;
+	volatile uint16_t middleIRVal;
+	volatile uint16_t leftFrontIRVal;
+	volatile uint16_t leftBackIRVal;
 };
 
 analogValues analog1;
 
-vector<movementVector> moveStack;
-
-enum Movement {noMove,forward,turnRight,turnLeft,turnAround};
+std::vector<movementVector> moveStack;
 
 uint8_t MAP [MAP_SIZE][MAP_SIZE] = {};    // bits   X,X,X,DONE,NORTH,EAST,SOUTH,WEST   wall=1   bit 5 if 1 cell has been mapped
 
@@ -67,6 +66,7 @@ void SystemClock_Config(void);
 static void GPIO_Init(void);
 static void ADC1_Init(void);
 static void TIM1_Init(void);
+static void EXTI_Init(void);
                                     
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
                                 
@@ -80,6 +80,10 @@ static void waitForButton(void);
 static void mapCell(void);
 static int checkMapComplete(void);
 static void analogRead(void);
+static void resetEnCounts(void);
+static void setMotorMove(movementVector);
+static void setNewPos(Movement);
+
 /***********************************************************************************
 **                                   MAIN                                         **
 ***********************************************************************************/
@@ -95,6 +99,7 @@ int main(void)
   GPIO_Init();
   ADC1_Init();
   TIM1_Init();
+	EXTI_Init();
 
 	if((GPIOB->IDR&0x80) == 0x80)
 	{
@@ -284,6 +289,20 @@ void exeMoveVector(void)
 }
 
 /***********************************************************************************
+Function   :  checkMapComplete()
+Description:  Checks to see if the current floodfill solution to the maze has all 
+              cells in the path mapped
+Inputs     :  None
+Outputs    :  returns a 1 or 0
+
+Status     :  Not Started
+***********************************************************************************/
+int checkMapComplete(void)
+{
+	return 0;
+}
+
+/***********************************************************************************
 Function   :  setMotorMove()
 Description:  Sets the PWMs up for the next movement 
 Inputs     :  move
@@ -346,7 +365,7 @@ Status     :  Complete for current implementation
 ***********************************************************************************/
 void setNewPos(Movement move)
 {
-	if(move == Forward)
+	if(move == forward)
 	{
 		switch (direction)
 		{
@@ -464,98 +483,201 @@ Description:  Configures the analog pins and starts the ADC
 Inputs     :  None
 Outputs    :  None
 
-Status     :  Probably works? Auto-generated code
+Status     :  Works!
 ***********************************************************************************/
 static void ADC1_Init(void)
 {
-
+	GPIO_InitTypeDef GPIO_InitStruct;
   ADC_ChannelConfTypeDef sConfig;
-
-    //Common config
-  hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
-  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-  hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 1;
+	
+	// Enable clock for GPIOA
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	
+	// Enable ADC Clock
+	__HAL_RCC_ADC_CLK_ENABLE();
+	
+	// ADC Periph interface clock configuration
+  __HAL_RCC_ADC_CONFIG(RCC_ADCCLKSOURCE_SYSCLK);
+	
+	// Configure GPIOA
+	GPIO_InitStruct.Pin   = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_3 |
+	                        GPIO_PIN_4 | GPIO_PIN_5;
+	GPIO_InitStruct.Mode  = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull  = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+	
+	/* Configure ADC1 */
+	hadc1.Instance = ADC1;
+	
+	// Reset peripheral
+	if(HAL_ADC_DeInit(&hadc1)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+  // Configure ADC settings
+  hadc1.Init.ClockPrescaler        = ADC_CLOCK_ASYNC_DIV1;
+  hadc1.Init.Resolution            = ADC_RESOLUTION_12B;
+  hadc1.Init.DataAlign             = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.ScanConvMode          = ADC_SCAN_ENABLE;       // Scan through all channels based on rank
+  hadc1.Init.EOCSelection          = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.LowPowerAutoWait      = DISABLE;
+  hadc1.Init.ContinuousConvMode    = ENABLE;
+  hadc1.Init.NbrOfConversion       = 5;                     // 5 channels to scan through
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfDiscConversion = 1;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.NbrOfDiscConversion   = 1;
+  hadc1.Init.ExternalTrigConv      = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc1.Init.DMAContinuousRequests = DISABLE;
-  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-  hadc1.Init.OversamplingMode = DISABLE;
-  HAL_ADC_Init(&hadc1);
+  hadc1.Init.Overrun               = ADC_OVR_DATA_OVERWRITTEN;
+  hadc1.Init.OversamplingMode      = DISABLE;
+  
+	if(HAL_ADC_Init(&hadc1)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
 
-    //Configure Regular Channel
-  sConfig.Channel = ADC_CHANNEL_5;
-  sConfig.Rank = 1;
+  //Configure Channel 5, PA0, IR_BL
+  sConfig.Channel      = ADC_CHANNEL_5;
+  sConfig.Rank         = ADC_REGULAR_RANK_1;       // scanning will be done in order
   sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
-  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.SingleDiff   = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
-  sConfig.Offset = 0;
-  HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-
+  sConfig.Offset       = 0;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 6, PA1, IR_FL
+  sConfig.Channel      = ADC_CHANNEL_6;
+  sConfig.Rank         = ADC_REGULAR_RANK_2;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 8, PA3, IR_M
+  sConfig.Channel      = ADC_CHANNEL_8;
+  sConfig.Rank         = ADC_REGULAR_RANK_3;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 9, PA4, IR_FR
+  sConfig.Channel      = ADC_CHANNEL_9;
+  sConfig.Rank         = ADC_REGULAR_RANK_4;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 10, PA5, IR_BR
+  sConfig.Channel      = ADC_CHANNEL_10;
+  sConfig.Rank         = ADC_REGULAR_RANK_5;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	/* Run the ADC calibration in single-ended mode */
+  if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
+  {
+    /* Calibration Error */
+    while(1){}
+  }
 }
 
 /***********************************************************************************
-Function   :  TIM1_init()
-Description:  Create a Base Timer that constantly counts the way we want it to.
-							We do this by creating a base platform called TimHandle which
-							has all the properties we want. Then, we make a empty copy called
-							TIM1 which will get all the setup values by tranfering it over with a
-							function called TIM_Base_SetConfig().
+Function   :  TIM1_Init()
+Description:  Configure Timer 1 to run 4 PWM outputs for the motors
 Inputs     :  None
 Outputs    :  None
 
-Status     :  PROTOTYPE
+Status     :  Probably works? Auto-generated code
 ***********************************************************************************/
 static void TIM1_Init(void)
 {
-	uint32_t PWM_Steps = 256;																					// Number of individual PWM steps we can use from 8 bits. 
-																																		// This is because 2^8(bits) means 256 possible combinations.
-	
-	uint32_t PWM_Frequency = 10000;																		// PWM Frequency is set at 10KHz.
-	
-	uint32_t TIMER_Frequency = 1000;																	// TIM1 Frequency is set at 1Khz.
-	
-  uint32_t COUNTER_Frequency = PWM_Steps * PWM_Frequency;						// This is the counter frequency that counts backwards 
-																																		// so that we can lock onto a signal.
-	
-  uint32_t PSC_Value = (TIMER_Frequency / COUNTER_Frequency) - 1;		// The PSC_Value is the Prescaler value to setup the timer scaling.
-	
-  uint16_t ARR_Value = PWM_Steps - 1;																// This represents the frequency for the base timer.
+  //declares some structs for init purposes
+  TIM_ClockConfigTypeDef sClockSourceConfig;
+  TIM_MasterConfigTypeDef sMasterConfig;
+  TIM_OC_InitTypeDef sConfigOC;
+  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig;
 
-	
-	TIM_HandleTypeDef TimHandle;																			// YOU MUST DO THIS LINE FIRST OR YOU CAN NEVER MAKE A TIMER OBJECT.
-	TIM_Base_InitTypeDef TimBase;
-																																		
-	TimHandle.Instance = TIM1;																				// Next, we take the structure.Instnce so we can give it a nickname called TIM1.
-																																		// This way we can use the timer just by calling TIM1 later on.
-//	TimBase.Prescaler = PSC_Value;
-//	TimBase.CounterMode = TIM_COUNTERMODE_DOWN;
-//	TimBase.Period = ARR_Value;
-//	TimBase.ClockDivision = 0;
-	
-	TimHandle.Init.Prescaler = PSC_Value;															// Now we setup the base timer using the TimHandle.
-	TimHandle.Init.CounterMode = TIM_COUNTERMODE_UP;
-	TimHandle.Init.Period = ARR_Value;
-	TimHandle.Init.ClockDivision = 0;																	// Do not divide the clock. We want the timer to count naturally up to 256.
-//	TimHandle.Init.RepetitionCounter = 0;														// Set this if you are using TIM_COUNTERMODE_DOWN.
-//	TimHandle.Init.AutoReloadPreload = 0;
+	//sets up the base timer 
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 0;
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 256;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  HAL_TIM_Base_Init(&htim1);
+  
+	//sets the reference clock source
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig);
 
-	TIM_Base_SetConfig( TIM1, &TimBase);
-	HAL_TIM_Base_Init(&TimHandle);
+	//enables the PWM functionality
+  HAL_TIM_PWM_Init(&htim1);
+
+  //does some shit that I haven't figured out yet
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig);
+
+  //configures the PWM settings and loads it to all 4 channels in use
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1);
+  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
+  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
+  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
+
+	//does some other shit that Im not sure about
+  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
+  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
+  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+  sBreakDeadTimeConfig.DeadTime = 0;
+  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+  sBreakDeadTimeConfig.BreakFilter = 0;
+  sBreakDeadTimeConfig.Break2State = TIM_BREAK2_DISABLE;
+  sBreakDeadTimeConfig.Break2Polarity = TIM_BREAK2POLARITY_HIGH;
+  sBreakDeadTimeConfig.Break2Filter = 0;
+  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
+  HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig);
+
+	//configures the Pins and starts the timer clock
+  //HAL_TIM_MspPostInit(&htim1);
 	
-	while (1)
-	{
-	}
-	
+	//starts the timer
+	HAL_TIM_Base_Start(&htim1); 
+	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1); 
+	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); 
+	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_3); 
+	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_4); 
 }
-
 
 /***********************************************************************************
 Function   :  GPIO_Init()
@@ -573,47 +695,46 @@ static void GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-	
 
-  /* Configure GPIO pin Output Level */
-	/* Settings all LED's to LOW */
+  /*Configure GPIO pin Output Level */
+  /* Settings all LED's to LOW */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2|GPIO_PIN_6|GPIO_PIN_7, GPIO_PIN_RESET);
 
-  /* Configure GPIO pins : PA2 PA6 PA7 */
-	/* GPIO pins for LED's */
+  /*Configure GPIO pins : PA2 PA6 PA7 */
+  /* GPIO pins for LED's */
   GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_6|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /* Configure GPIO pins : PB0 PB1 PB4 PB5 */
-	/* GPIO pins for ENCODER */
+  /*Configure GPIO pins : PB0 PB1 PB4 PB5 */
+  /* GPIO pins for ENCODER */
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4|GPIO_PIN_5;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /* Configure GPIO pin : PA12 */
-	/* GPIO pins for DIGITAL IN (BUTTON) */
+  /*Configure GPIO pin : PA12 */
+  /* GPIO pins for DIGITAL IN (BUTTON) */
   GPIO_InitStruct.Pin = GPIO_PIN_12;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /* Configure GPIO pins : PB6 PB7 */
-	/* GPIO pins for DIGITAL IN (DIP SWITCHES) */
+  /*Configure GPIO pins : PB6 PB7 */
+  /* GPIO pins for DIGITAL IN (DIP SWITCHES) */
   GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-	
-	
-	/* Configure GPIO pins : A8 A9 A10 A11 */
-	/* GPIO pins for PWM/TIMER1 OUTPUT to (MOTORS) */
-	GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  
+  /* Configure GPIO pins : A8 A9 A10 A11 */
+  /* GPIO pins for PWM/TIMER1 OUTPUT to (MOTORS) */
+  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 }
 
@@ -644,11 +765,52 @@ Description:  Gets the analog values from each of the ADC channels and loads the
 Inputs     :  None
 Outputs    :  None
 
-Status     :  Not Started
+Status     :  Seems to work.  Could test if struct is properly populated.
+              How values are stored in the struct should also be looked at.
 ***********************************************************************************/
 static void analogRead(void)
 {
 	
+	/* Start the conversion process */
+  if (HAL_ADC_Start(&hadc1) != HAL_OK)
+  {
+    /* Start Conversation Error */
+    while(1){}
+  }
+	
+	/* Poll for conversions */
+	for(int conv_index = 0; conv_index < 5; conv_index++)
+	{
+		if(HAL_ADC_PollForConversion(&hadc1, 10) != HAL_OK)
+		{
+			/* loop if error occured*/
+			while(1){}
+		}
+		else
+		{
+			/* store converted value based on set rank in ADC1_Init */
+			switch(conv_index)
+			{
+				case 0:  analog1.leftBackIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 1:  analog1.leftFrontIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 2:  analog1.middleIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 3:  analog1.rightFrontIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 4:  analog1.rightBackIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+			}
+		}
+	}
+	
+	/* End conversion process */
+	if (HAL_ADC_Stop(&hadc1) != HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
 }
 
 /***********************************************************************************
