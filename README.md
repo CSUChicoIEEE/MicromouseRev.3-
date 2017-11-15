@@ -60,3 +60,19 @@ PINOUT FOR THE STM32L432KC EVAL BOARD
 28:RST          :
 29:GND          :GND
 30:VIN          :
+
+
+****************************************************************************************
+                                 Testing Checklist
+****************************************************************************************
+
+PWM Output Works    :
+ADC Input Checks out:
+EXTI Interupts Occur:
+DIP Switch Works    :
+ADC readings from IR:
+GPIO init works     :
+Button works        :
+LEDs work           :
+
+
