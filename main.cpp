@@ -22,6 +22,7 @@
 #define EAST 0x1
 #define SOUTH 0x2
 #define WEST 0x3
+
 #define BASE_SPEED 60
 
 ADC_HandleTypeDef hadc1;
@@ -31,8 +32,10 @@ static volatile uint32_t enCountRight = 0;
 static volatile uint32_t enCountLeft = 0;
 static bool rightMotorFinish = 0;
 static bool leftMotorFinish = 0;
+
 static uint8_t currentXpos;
 static uint8_t currentYpos;
+
 static uint8_t direction;
 static uint8_t defaultDir;
 
@@ -78,12 +81,14 @@ map MAP [MAP_SIZE][MAP_SIZE] = {};
 
 /* Private function prototypes -----------------------------------------------*/
 void TEST(void);
+
 void SystemClock_Config(void);
 static void GPIO_Init(void);
 static void ADC1_Init(void);
 static void TIM1_Init(void);
 static void EXTI_Init(void);
 static void Struct_Init(void);
+
                                     
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
                                 
@@ -151,8 +156,8 @@ int main(void)
 	turnAroundMove.moveType = turnAround;
 	
 	
-	TEST();
-	
+	//TEST();
+
 	if((GPIOB->IDR&0x80) == 0x80)
 	{
 		defaultDir = WEST;
@@ -161,11 +166,11 @@ int main(void)
 	{
 		defaultDir = NORTH;
 	}
+
 	currentXpos = 0;
 	currentYpos = 0;
 	direction = defaultDir;
-	
-	
+  
 	waitForButton();
 	while(1)
 	{
@@ -178,6 +183,7 @@ int main(void)
 			while((checkMapComplete()==1)&&((GPIOB->IDR&0xC0) == 0x00))
 			{
 				if((currentXpos != 0)&&(currentYpos != 0)&&(direction != defaultDir))
+
 				{
 					genStartVector();
 					exeMoveVector();
@@ -222,6 +228,7 @@ Status     :  Complete, works as intended for the current implementation
 ***********************************************************************************/
 void mapCell(void)
 {
+
 	if(MAP[currentXpos][currentYpos].scanned == 1) //if current map position has not been mapped
 	{ 
 		MAP[currentXpos][currentYpos].scanned = 1;
@@ -245,6 +252,7 @@ void mapCell(void)
 			case WEST:
 				if(analog1.middleIRVal<=WALL_THRESHOLD_S) 
 				{
+
 					MAP[currentXpos][currentYpos].walls|=0x01;
 				}
 				if(analog1.leftFrontIRVal<=WALL_THRESHOLD_S) 
@@ -273,6 +281,7 @@ void mapCell(void)
 			case EAST:
 				if(analog1.middleIRVal<=WALL_THRESHOLD_S) 
 				{
+
 					MAP[currentXpos][currentYpos].walls|=0x04;
 				}
 				if(analog1.leftFrontIRVal<=WALL_THRESHOLD_S) 
@@ -401,6 +410,7 @@ Function   :  genMoveVector()
 Description:  generates the movement steps to get to the next unmapped cell of the maze
 Inputs     :  None
 Outputs    :  None
+
 
 Status     :  mostly done, will have errors because it doesn't account for starting direction of uMouse
 ***********************************************************************************/
@@ -652,6 +662,7 @@ Description:  generates the movement steps of the solution to the maze
 Inputs     :  None
 Outputs    :  None
 
+
 Status     :  floodfill done
 ***********************************************************************************/
 void genRunVector(void)
@@ -851,41 +862,123 @@ Description:  Configures the analog pins and starts the ADC
 Inputs     :  None
 Outputs    :  None
 
-Status     :  Probably works? Auto-generated code
+Status     :  Works!
 ***********************************************************************************/
 static void ADC1_Init(void)
 {
-
+	GPIO_InitTypeDef GPIO_InitStruct;
   ADC_ChannelConfTypeDef sConfig;
-
-    //Common config
-  hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
-  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-  hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 1;
+	
+	// Enable clock for GPIOA
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	
+	// Enable ADC Clock
+	__HAL_RCC_ADC_CLK_ENABLE();
+	
+	// ADC Periph interface clock configuration
+  __HAL_RCC_ADC_CONFIG(RCC_ADCCLKSOURCE_SYSCLK);
+	
+	// Configure GPIOA
+	GPIO_InitStruct.Pin   = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_3 |
+	                        GPIO_PIN_4 | GPIO_PIN_5;
+	GPIO_InitStruct.Mode  = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull  = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+	
+	/* Configure ADC1 */
+	hadc1.Instance = ADC1;
+	
+	// Reset peripheral
+	if(HAL_ADC_DeInit(&hadc1)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+  // Configure ADC settings
+  hadc1.Init.ClockPrescaler        = ADC_CLOCK_ASYNC_DIV1;
+  hadc1.Init.Resolution            = ADC_RESOLUTION_12B;
+  hadc1.Init.DataAlign             = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.ScanConvMode          = ADC_SCAN_ENABLE;       // Scan through all channels based on rank
+  hadc1.Init.EOCSelection          = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.LowPowerAutoWait      = DISABLE;
+  hadc1.Init.ContinuousConvMode    = ENABLE;
+  hadc1.Init.NbrOfConversion       = 5;                     // 5 channels to scan through
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfDiscConversion = 1;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.NbrOfDiscConversion   = 1;
+  hadc1.Init.ExternalTrigConv      = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc1.Init.DMAContinuousRequests = DISABLE;
-  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-  hadc1.Init.OversamplingMode = DISABLE;
-  HAL_ADC_Init(&hadc1);
+  hadc1.Init.Overrun               = ADC_OVR_DATA_OVERWRITTEN;
+  hadc1.Init.OversamplingMode      = DISABLE;
+  
+	if(HAL_ADC_Init(&hadc1)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
 
-    //Configure Regular Channel
-  sConfig.Channel = ADC_CHANNEL_5;
-  sConfig.Rank = 1;
+  //Configure Channel 5, PA0, IR_BL
+  sConfig.Channel      = ADC_CHANNEL_5;
+  sConfig.Rank         = ADC_REGULAR_RANK_1;       // scanning will be done in order
   sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
-  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.SingleDiff   = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
-  sConfig.Offset = 0;
-  HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-
+  sConfig.Offset       = 0;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 6, PA1, IR_FL
+  sConfig.Channel      = ADC_CHANNEL_6;
+  sConfig.Rank         = ADC_REGULAR_RANK_2;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 8, PA3, IR_M
+  sConfig.Channel      = ADC_CHANNEL_8;
+  sConfig.Rank         = ADC_REGULAR_RANK_3;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 9, PA4, IR_FR
+  sConfig.Channel      = ADC_CHANNEL_9;
+  sConfig.Rank         = ADC_REGULAR_RANK_4;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 10, PA5, IR_BR
+  sConfig.Channel      = ADC_CHANNEL_10;
+  sConfig.Rank         = ADC_REGULAR_RANK_5;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	/* Run the ADC calibration in single-ended mode */
+  if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
+  {
+    /* Calibration Error */
+    while(1){}
+  }
 }
 
 /***********************************************************************************
@@ -901,7 +994,7 @@ static void TIM1_Init(void)
   //declares some structs for init purposes
   TIM_ClockConfigTypeDef sClockSourceConfig;
   TIM_OC_InitTypeDef sConfigOC;
-  
+
 
 	//sets up the base timer 
   htim1.Instance = TIM1;
@@ -932,6 +1025,7 @@ static void TIM1_Init(void)
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
+
 	
 	//starts the timer and enables the PWM Channels
 	HAL_TIM_Base_Start(&htim1); 
@@ -1003,11 +1097,15 @@ static void GPIO_Init(void)
 	
 	//PWM pin config
 	/*Configure GPIO pins : PA8 PA9 PA10 PA11 */
-	GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+	//GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
+  //GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  //GPIO_InitStruct.Pull = GPIO_NOPULL;
+	//GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
+	//GPIO_InitStruct.Alternate = GPIO_AF1_TIM1;
+  
+  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
-	GPIO_InitStruct.Alternate = GPIO_AF1_TIM1;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 }
@@ -1039,11 +1137,51 @@ Description:  Gets the analog values from each of the ADC channels and loads the
 Inputs     :  None
 Outputs    :  None
 
-Status     :  Not Started
+Status     :  Seems to work.  Could test if struct is properly populated.
+              How values are stored in the struct should also be looked at.
 ***********************************************************************************/
 static void analogRead(void)
 {
+	/* Start the conversion process */
+  if (HAL_ADC_Start(&hadc1) != HAL_OK)
+  {
+    /* Start Conversation Error */
+    while(1){}
+  }
 	
+	/* Poll for conversions */
+	for(int conv_index = 0; conv_index < 5; conv_index++)
+	{
+		if(HAL_ADC_PollForConversion(&hadc1, 10) != HAL_OK)
+		{
+			/* loop if error occured*/
+			while(1){}
+		}
+		else
+		{
+			/* store converted value based on set rank in ADC1_Init */
+			switch(conv_index)
+			{
+				case 0:  analog1.leftBackIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 1:  analog1.leftFrontIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 2:  analog1.middleIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 3:  analog1.rightFrontIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 4:  analog1.rightBackIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+			}
+		}
+	}
+	
+	/* End conversion process */
+	if (HAL_ADC_Stop(&hadc1) != HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
 }
 
 /***********************************************************************************
