@@ -27,9 +27,9 @@ PINOUT FOR THE STM32L432KC EVAL BOARD
 14 *         * 17
 15 *         * 16
 
-*******************************
-# :NAME         :CURRENT USE
-*******************************
+*******************************************************
+# :NAME         :CURRENT USE              :TEST BENCH
+*******************************************************
 1 :PA9          :PWM motor A1
 2 :PA10         :PWM motor A2
 3 :RST          :
@@ -60,3 +60,19 @@ PINOUT FOR THE STM32L432KC EVAL BOARD
 28:RST          :
 29:GND          :GND
 30:VIN          :
+
+
+****************************************************************************************
+                                 Testing Checklist
+****************************************************************************************
+
+PWM Output Works    :
+ADC Input Checks out:
+EXTI Interupts Occur:
+DIP Switch Works    :
+ADC readings from IR:
+GPIO init works     :
+Button works        :
+LEDs work           :
+
+
