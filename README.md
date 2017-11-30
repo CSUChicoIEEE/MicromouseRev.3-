@@ -66,13 +66,38 @@ PINOUT FOR THE STM32L432KC EVAL BOARD
                                  Testing Checklist
 ****************************************************************************************
 
-PWM Output Works    :
-ADC Input Checks out:
-EXTI Interupts Occur:
-DIP Switch Works    :
-ADC readings from IR:
-GPIO init works     :
-Button works        :
-LEDs work           :
+Basic Configuration Testing
 
+ADC Reads Data             : Yes, Complete
+PWM Generates Output       : Nope
+External Interupts trigger : Nope
+LEDs light up on command   :
+Button triggers            :
+Switches trigger           :
 
+Level 2 Testing 
+
+ADC reads from IR Sensors  :
+-Data from IR is usable    :
+PWM causes Motors to spin  :
+-Is configurable           :
+EXTI counts wheel turns    :
+
+Level 3 Testing 
+
+Can execute a movement vector accurately              :
+Can execute a set of movement vectors accurately      :
+Scans Walls and populates Map array successfully      :
+
+Level 4 Testing
+
+Can generate its own movement vectors                 :
+-the generated movement doesn't run into walls        :
+-the generated movement gets it to the right place    :
+Can check for Solutions as it runs                    :
+Can get back to the start on its own                  :
+-generate move vector from current location to start  :
+
+Level 5 Testing
+
+Does it solve the maze on its own                     :
