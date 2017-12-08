@@ -23,8 +23,6 @@
 #define SOUTH 0x2
 #define WEST 0x3
 
-#define BASE_SPEED 60
-
 ADC_HandleTypeDef hadc1;
 TIM_HandleTypeDef htim1;
 
@@ -32,10 +30,8 @@ static volatile uint32_t enCountRight = 0;
 static volatile uint32_t enCountLeft = 0;
 static bool rightMotorFinish = 0;
 static bool leftMotorFinish = 0;
-
-static uint8_t currentXpos;
-static uint8_t currentYpos;
-
+static uint8_t mapXpos;
+static uint8_t mapYpos;
 static uint8_t direction;
 static uint8_t defaultDir;
 
@@ -52,43 +48,25 @@ struct movementVector {
 };
 
 struct analogValues {
-	uint16_t rightBackIRVal;
-	uint16_t rightFrontIRVal;
-	uint16_t middleIRVal;
-	uint16_t leftFrontIRVal;
-	uint16_t leftBackIRVal;
+	volatile uint16_t rightBackIRVal;
+	volatile uint16_t rightFrontIRVal;
+	volatile uint16_t middleIRVal;
+	volatile uint16_t leftFrontIRVal;
+	volatile uint16_t leftBackIRVal;
 };
-
-struct map {
-	uint8_t xPos;
-	uint8_t yPos;
-	uint16_t fillVal;
-	uint8_t walls;        // bits   X,X,X,X,NORTH,EAST,SOUTH,WEST  wall=1
-	bool scanned;
-};
-
-static movementVector forwardMove;
-static movementVector turnRightMove;
-static movementVector turnLeftMove;
-static movementVector turnAroundMove;
 
 analogValues analog1;
 
 std::vector<movementVector> moveStack;
-std::vector<map> floodStack;
 
-map MAP [MAP_SIZE][MAP_SIZE] = {};    
+uint8_t MAP [MAP_SIZE][MAP_SIZE] = {};    // bits   X,X,X,DONE,NORTH,EAST,SOUTH,WEST   wall=1   bit 5 if 1 cell has been mapped
 
 /* Private function prototypes -----------------------------------------------*/
-void TEST(void);
-
 void SystemClock_Config(void);
 static void GPIO_Init(void);
 static void ADC1_Init(void);
 static void TIM1_Init(void);
 static void EXTI_Init(void);
-static void Struct_Init(void);
-
                                     
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
                                 
@@ -122,41 +100,6 @@ int main(void)
   ADC1_Init();
   TIM1_Init();
 	EXTI_Init();
-	
-	forwardMove.pwmL1 = BASE_SPEED;
-	forwardMove.pwmL2 = 0;
-	forwardMove.pwmR1 = BASE_SPEED;
-	forwardMove.pwmR2 = 0;
-	forwardMove.leftMotorSteps = ONE_SQUARE;
-	forwardMove.rightMotorSteps = ONE_SQUARE;
-	forwardMove.moveType = forward;
-	
-	turnRightMove.pwmL1 = BASE_SPEED;
-	turnRightMove.pwmL2 = 0;
-	turnRightMove.pwmR1 = BASE_SPEED*(TURN_OUTSIDE/TURN_INSIDE);
-	turnRightMove.pwmR2 = 0;
-	turnRightMove.leftMotorSteps = TURN_OUTSIDE;
-	turnRightMove.rightMotorSteps = TURN_INSIDE;
-	turnRightMove.moveType = turnRight;
-	
-	turnLeftMove.pwmL1 = BASE_SPEED*(TURN_OUTSIDE/TURN_INSIDE);
-	turnLeftMove.pwmL2 = 0;
-	turnLeftMove.pwmR1 = BASE_SPEED;
-	turnLeftMove.pwmR2 = 0;
-	turnLeftMove.leftMotorSteps = TURN_INSIDE;
-	turnLeftMove.rightMotorSteps = TURN_OUTSIDE;
-	turnLeftMove.moveType = turnLeft;
-	
-	turnAroundMove.pwmL1 = BASE_SPEED;
-	turnAroundMove.pwmL2 = 0;
-	turnAroundMove.pwmR1 = 0;
-	turnAroundMove.pwmR2 = BASE_SPEED;
-	turnAroundMove.leftMotorSteps = TURN_AROUND;
-	turnAroundMove.rightMotorSteps = TURN_AROUND;
-	turnAroundMove.moveType = turnAround;
-	
-	
-	//TEST();
 
 	if((GPIOB->IDR&0x80) == 0x80)
 	{
@@ -166,11 +109,11 @@ int main(void)
 	{
 		defaultDir = NORTH;
 	}
-
-	currentXpos = 0;
-	currentYpos = 0;
+	mapXpos = 0;
+	mapYpos = 0;
 	direction = defaultDir;
-  
+	//TEST();
+	
 	waitForButton();
 	while(1)
 	{
@@ -182,8 +125,7 @@ int main(void)
 			exeMoveVector();
 			while((checkMapComplete()==1)&&((GPIOB->IDR&0xC0) == 0x00))
 			{
-				if((currentXpos != 0)&&(currentYpos != 0)&&(direction != defaultDir))
-
+				if((mapXpos != 0)&&(mapYpos != 0)&&(direction != defaultDir))
 				{
 					genStartVector();
 					exeMoveVector();
@@ -207,16 +149,7 @@ int main(void)
 **                               MAIN END                                         **
 ***********************************************************************************/
 
-/***********************************************************************************
-Function   :  TEST()
-Description:  Does Test things
-Inputs     :  None
-Outputs    :  None
-***********************************************************************************/
-void TEST()
-{
-	while(1);
-}
+
 
 /***********************************************************************************
 Function   :  mapCell()
@@ -228,69 +161,66 @@ Status     :  Complete, works as intended for the current implementation
 ***********************************************************************************/
 void mapCell(void)
 {
-
-	if(MAP[currentXpos][currentYpos].scanned == 1) //if current map position has not been mapped
+	if((MAP[mapXpos][mapYpos]&0x10)==0x10) //if current map position has not been mapped
 	{ 
-		MAP[currentXpos][currentYpos].scanned = 1;
+		MAP[mapXpos][mapYpos]|=0x10;
 		analogRead();
 		switch(direction) 
 		{
 			case NORTH:
 				if(analog1.middleIRVal<=WALL_THRESHOLD_S)
 				{
-					MAP[currentXpos][currentYpos].walls|=0x08;
+					MAP[mapXpos][mapYpos]|=0x08;
 				}
 				if(analog1.leftFrontIRVal<=WALL_THRESHOLD_S) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x01;
+					MAP[mapXpos][mapYpos]|=0x01;
 				}
 				if(analog1.rightFrontIRVal<=WALL_THRESHOLD_S) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x04;
+					MAP[mapXpos][mapYpos]|=0x04;
 				}
 				break;
 			case WEST:
 				if(analog1.middleIRVal<=WALL_THRESHOLD_S) 
 				{
-
-					MAP[currentXpos][currentYpos].walls|=0x01;
+					MAP[mapXpos][mapYpos]|=0x01;
 				}
 				if(analog1.leftFrontIRVal<=WALL_THRESHOLD_S) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x02;
+					MAP[mapXpos][mapYpos]|=0x02;
 				}
 				if(analog1.rightFrontIRVal<=WALL_THRESHOLD_S) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x08;
+					MAP[mapXpos][mapYpos]|=0x08;
 				}
 				break;
 			case SOUTH:
 				if(analog1.middleIRVal<=WALL_THRESHOLD_S) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x02;
+					MAP[mapXpos][mapYpos]|=0x02;
 				}
 				if(analog1.leftFrontIRVal<=WALL_THRESHOLD_S) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x04;
+					MAP[mapXpos][mapYpos]|=0x04;
 				}
 				if(analog1.rightFrontIRVal<=WALL_THRESHOLD_S) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x01;
+					MAP[mapXpos][mapYpos]|=0x01;
 				}
 				break;
 			case EAST:
 				if(analog1.middleIRVal<=WALL_THRESHOLD_S) 
 				{
-
-					MAP[currentXpos][currentYpos].walls|=0x04;
+					MAP[mapXpos][mapYpos]|=0x04;
 				}
 				if(analog1.leftFrontIRVal<=WALL_THRESHOLD_S) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x08;
+					MAP[mapXpos][mapYpos]|=0x08;
 				}
 				if(analog1.rightFrontIRVal<=WALL_THRESHOLD_S) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x02;
+					MAP[mapXpos][mapYpos]|=0x02;
 				}
 				break;
 		}
@@ -386,198 +316,16 @@ void setMotorMove(movementVector move)
 }
 
 /***********************************************************************************
-Function   :  resetFillVals()
-Description:  Resets the floodfill values to prevent old flood fill instances from 
-              interfering with the current process
-Inputs     :  None
-Outputs    :  None
-
-Status     :  Complete
-***********************************************************************************/
-void resetFillVals(void)
-{
-	for(int i = 0;i<MAP_SIZE;i++)
-	{
-		for(int j = 0;j<MAP_SIZE;j++)
-		{
-			MAP[i][j].fillVal = 0;
-		}
-	}
-}
-
-/***********************************************************************************
 Function   :  genMoveVector()
 Description:  generates the movement steps to get to the next unmapped cell of the maze
 Inputs     :  None
 Outputs    :  None
 
-
-Status     :  mostly done, will have errors because it doesn't account for starting direction of uMouse
+Status     :  Not Started
 ***********************************************************************************/
 void genMoveVector(void)
 {
-	//reset the fillVals so that past iterations of flood fill dont interfere
-	resetFillVals();
-	map workingCell, targetCell, previousCell,nextCell;
-	bool targetPosFound = 0;
-	bool turned = 0;
 	
-	//load current position as the starting point and set fillVal
-	MAP[currentXpos][currentYpos].fillVal = 0x8000;
-	floodStack.insert(0,MAP[currentXpos][currentYpos]);
-	
-	//while the destination hasn't been found yet
-	while(targetPosFound == 0)
-	{
-		//load a cell off the stack 
-		workingCell = floodStack.back();
-		floodStack.pop_back();
-		
-		//if the cell that was loaded has not been scanned, set as destination
-		if(workingCell.scanned == 0)
-		{
-			targetCell = workingCell;
-			targetPosFound = 1;
-		}
-		
-		//if there is a path from the currently loaded cell and the fill value of that cell is 0, set fillVal and add to stack.
-		for(int j = 0;j<4;j++)
-		{
-			// checks the walls in the order of WEST, SOUTH, EAST, NORTH
-			if((workingCell.walls&(0x1<<j)) != (0x1<<j))
-			{
-				switch(j)
-				{
-					case(0):
-						if(MAP[workingCell.xPos-1][workingCell.yPos].fillVal != 0)
-						{
-							MAP[workingCell.xPos-1][workingCell.yPos].fillVal = (workingCell.fillVal+1);
-							floodStack.insert(0,MAP[workingCell.xPos-1][workingCell.yPos]);
-						}
-					break;
-					case(1):
-						if(MAP[workingCell.xPos][workingCell.yPos-1].fillVal != 0)
-						{
-							MAP[workingCell.xPos][workingCell.yPos-1].fillVal = (workingCell.fillVal+1);
-							floodStack.insert(0,MAP[workingCell.xPos][workingCell.yPos-1]);
-						}
-					break;
-					case(2):
-						if(MAP[workingCell.xPos+1][workingCell.yPos].fillVal != 0)
-						{
-							MAP[workingCell.xPos+1][workingCell.yPos].fillVal = (workingCell.fillVal+1);
-							floodStack.insert(0,MAP[workingCell.xPos+1][workingCell.yPos]);
-						}
-					break;
-					case(3):
-						if(MAP[workingCell.xPos][workingCell.yPos+1].fillVal != 0)
-						{
-							MAP[workingCell.xPos][workingCell.yPos+1].fillVal = (workingCell.fillVal+1);
-							floodStack.insert(0,MAP[workingCell.xPos][workingCell.yPos+1]);
-						}
-					break;
-				}
-			}	
-		}
-	}
-	
-	//fills the moveStack with The steps needed to get to the target cell
-	for(int i = 0;i<targetCell.fillVal;i++)
-	{
-		//next cell West
-		if(MAP[workingCell.xPos-1][workingCell.yPos].fillVal == (workingCell.fillVal-1))
-		{
-			if(previousCell.fillVal != 0)
-			{
-				if(previousCell.xPos == workingCell.xPos)
-				{
-					if((previousCell.yPos>workingCell.yPos)&&(turned == 0))
-					{
-						moveStack.push_back(turnLeftMove);
-						turned = 1;
-					}
-					if((previousCell.yPos<workingCell.yPos)&&(turned == 0))
-					{
-						moveStack.push_back(turnRightMove);
-						turned = 1;
-					}
-				}
-			}
-			moveStack.push_back(forwardMove);
-			previousCell = workingCell;
-			workingCell = MAP[workingCell.xPos-1][workingCell.yPos];
-		}
-		//next cell East
-		if(MAP[workingCell.xPos+1][workingCell.yPos].fillVal == (workingCell.fillVal-1))
-		{
-			if(previousCell.fillVal != 0)
-			{
-				if(previousCell.xPos == workingCell.xPos)
-				{
-					if((previousCell.yPos>workingCell.yPos)&&(turned == 0))
-					{
-						moveStack.push_back(turnRightMove);
-						turned = 1;
-					}
-					if((previousCell.yPos<workingCell.yPos)&&(turned == 0))
-					{
-						moveStack.push_back(turnLeftMove);
-						turned = 1;
-					}
-				}
-			}
-			moveStack.push_back(forwardMove);
-			previousCell = workingCell;
-			workingCell = MAP[workingCell.xPos+1][workingCell.yPos];
-		}
-		//next cell South
-		if(MAP[workingCell.xPos][workingCell.yPos-1].fillVal == (workingCell.fillVal-1))
-		{
-			if(previousCell.fillVal != 0)
-			{
-				if(previousCell.yPos == workingCell.yPos)
-				{
-					if((previousCell.xPos>workingCell.xPos)&&(turned == 0))
-					{
-						moveStack.push_back(turnLeftMove);
-						turned = 1;
-					}
-					if((previousCell.xPos<workingCell.xPos)&&(turned == 0))
-					{
-						moveStack.push_back(turnRightMove);
-						turned = 1;
-					}
-				}
-			}
-			moveStack.push_back(forwardMove);
-			previousCell = workingCell;
-			workingCell = MAP[workingCell.xPos][workingCell.yPos-1];
-		}
-		//next cell South
-		if(MAP[workingCell.xPos][workingCell.yPos+1].fillVal == (workingCell.fillVal-1))
-		{
-			if(previousCell.fillVal != 0)
-			{
-				if(previousCell.yPos == workingCell.yPos)
-				{
-					if((previousCell.xPos>workingCell.xPos)&&(turned == 0))
-					{
-						moveStack.push_back(turnRightMove);
-						turned = 1;
-					}
-					if((previousCell.xPos<workingCell.xPos)&&(turned == 0))
-					{
-						moveStack.push_back(turnLeftMove);
-						turned = 1;
-					}
-				}
-			}
-			moveStack.push_back(forwardMove);
-			previousCell = workingCell;
-			workingCell = MAP[workingCell.xPos][workingCell.yPos+1];
-		}
-		turned = 0;
-	}
 }
 
 /***********************************************************************************
@@ -586,74 +334,11 @@ Description:  generates the movement steps to get to position (0,0)
 Inputs     :  None
 Outputs    :  None
 
-Status     :  floodfill done 
+Status     :  Not Started
 ***********************************************************************************/
 void genStartVector(void)
 {
-	//reset the fillVals so that past iterations of flood fill dont interfere
-	resetFillVals();
-	map workingCell, targetCell, previousCell,nextCell;
-	bool targetPosFound = 0;
-	bool turned = 0;
 	
-	//load current position as the starting point and set fillVal
-	MAP[currentXpos][currentYpos].fillVal = 0x8000;
-	floodStack.insert(0,MAP[currentXpos][currentYpos]);
-	
-	//while the destination hasn't been found yet
-	while(targetPosFound == 0)
-	{
-		//load a cell off the stack 
-		workingCell = floodStack.back();
-		floodStack.pop_back();
-		
-		//if the start point of the maze gets filled 
-		if(MAP[0][0].fillVal != 0)
-		{
-			targetPosFound = 1;
-		}
-		
-		//if there is a path from the currently loaded cell and the fill value of that cell is 0, set fillVal and add to stack.
-		for(int j = 0;j<4;j++)
-		{
-			// checks the walls in the order of WEST, SOUTH, EAST, NORTH
-			if((workingCell.walls&(0x1<<j)) != (0x1<<j))
-			{
-				switch(j)
-				{
-					case(0):
-						if(MAP[workingCell.xPos-1][workingCell.yPos].fillVal != 0)
-						{
-							MAP[workingCell.xPos-1][workingCell.yPos].fillVal = (workingCell.fillVal+1);
-							floodStack.insert(0,MAP[workingCell.xPos-1][workingCell.yPos]);
-						}
-					break;
-					case(1):
-						if(MAP[workingCell.xPos][workingCell.yPos-1].fillVal != 0)
-						{
-							MAP[workingCell.xPos][workingCell.yPos-1].fillVal = (workingCell.fillVal+1);
-							floodStack.insert(0,MAP[workingCell.xPos][workingCell.yPos-1]);
-						}
-					break;
-					case(2):
-						if(MAP[workingCell.xPos+1][workingCell.yPos].fillVal != 0)
-						{
-							MAP[workingCell.xPos+1][workingCell.yPos].fillVal = (workingCell.fillVal+1);
-							floodStack.insert(0,MAP[workingCell.xPos+1][workingCell.yPos]);
-						}
-					break;
-					case(3):
-						if(MAP[workingCell.xPos][workingCell.yPos+1].fillVal != 0)
-						{
-							MAP[workingCell.xPos][workingCell.yPos+1].fillVal = (workingCell.fillVal+1);
-							floodStack.insert(0,MAP[workingCell.xPos][workingCell.yPos+1]);
-						}
-					break;
-				}
-			}	
-		}
-	}
-	//more stuff goes here
 }
 
 /***********************************************************************************
@@ -662,75 +347,11 @@ Description:  generates the movement steps of the solution to the maze
 Inputs     :  None
 Outputs    :  None
 
-
-Status     :  floodfill done
+Status     :  Not Started
 ***********************************************************************************/
 void genRunVector(void)
 {
-	//reset the fillVals so that past iterations of flood fill dont interfere
-	resetFillVals();
-	map workingCell, targetCell, previousCell,nextCell;
-	bool targetPosFound = 0;
-	bool turned = 0;
 	
-	//load start position as the starting point and set fillVal
-	MAP[0][0].fillVal = 0x8000;
-	floodStack.insert(0,MAP[0][0]);
-	
-	//while the center square hasn't been found yet
-	while(targetPosFound == 0)
-	{
-		//load a cell off the stack 
-		workingCell = floodStack.back();
-		floodStack.pop_back();
-		
-		//if the center square has been filled
-		if(MAP[8][8].fillVal != 0)
-		{
-			targetPosFound = 1;
-		}
-		
-		//check walls of working cell. if there is a path, add the adjacent cell to the stack and set its fillVal
-		for(int j = 0;j<4;j++)
-		{
-			// checks the walls in the order of WEST, SOUTH, EAST, NORTH
-			if((workingCell.walls&(0x1<<j)) != (0x1<<j))
-			{
-				switch(j)
-				{
-					case(0):
-						if(MAP[workingCell.xPos-1][workingCell.yPos].fillVal != 0)
-						{
-							MAP[workingCell.xPos-1][workingCell.yPos].fillVal = (workingCell.fillVal+1);
-							floodStack.insert(0,MAP[workingCell.xPos-1][workingCell.yPos]);
-						}
-					break;
-					case(1):
-						if(MAP[workingCell.xPos][workingCell.yPos-1].fillVal != 0)
-						{
-							MAP[workingCell.xPos][workingCell.yPos-1].fillVal = (workingCell.fillVal+1);
-							floodStack.insert(0,MAP[workingCell.xPos][workingCell.yPos-1]);
-						}
-					break;
-					case(2):
-						if(MAP[workingCell.xPos+1][workingCell.yPos].fillVal != 0)
-						{
-							MAP[workingCell.xPos+1][workingCell.yPos].fillVal = (workingCell.fillVal+1);
-							floodStack.insert(0,MAP[workingCell.xPos+1][workingCell.yPos]);
-						}
-					break;
-					case(3):
-						if(MAP[workingCell.xPos][workingCell.yPos+1].fillVal != 0)
-						{
-							MAP[workingCell.xPos][workingCell.yPos+1].fillVal = (workingCell.fillVal+1);
-							floodStack.insert(0,MAP[workingCell.xPos][workingCell.yPos+1]);
-						}
-					break;
-				}
-			}	
-		}
-	}
-	//more stuff goes here
 }
 
 /***********************************************************************************
@@ -749,16 +370,16 @@ void setNewPos(Movement move)
 		switch (direction)
 		{
 			case NORTH:
-				currentYpos++;
+				mapYpos++;
 				break;
 			case WEST:
-				currentXpos++;
+				mapXpos++;
 				break;
 			case SOUTH:
-				currentYpos--;
+				mapYpos--;
 				break;
 			case EAST:
-				currentXpos--;
+				mapXpos--;
 				break;
 		}
 	}
@@ -797,6 +418,20 @@ void resetEnCounts()
 /***********************************************************************************
 Function   :  SystemClock_Config()
 Description:  Configures the Base Clock that all other periferals use
+               The system Clock is configured as follows :
+                   System Clock source            = PLL (MSI)
+                   SYSCLK(Hz)                     = 80000000
+                   HCLK(Hz)                       = 80000000
+                   AHB Prescaler                  = 1
+                   APB1 Prescaler                 = 1
+                   APB2 Prescaler                 = 1
+                   MSI Frequency(Hz)              = 4000000
+                   PLL_M                          = 1
+                   PLL_N                          = 40
+                   PLL_R                          = 2
+                   PLL_P                          = 7
+                   PLL_Q                          = 4
+                   Flash Latency(WS)              = 4
 Inputs     :  None
 Outputs    :  None
 
@@ -805,55 +440,39 @@ Status     :  Probably works? Auto-generated code
 void SystemClock_Config(void)
 {
 
-  RCC_OscInitTypeDef RCC_OscInitStruct;
-  RCC_ClkInitTypeDef RCC_ClkInitStruct;
-  RCC_PeriphCLKInitTypeDef PeriphClkInit;
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
 
-    /**Initializes the CPU, AHB and APB busses clocks 
-    */
+  /* MSI is enabled after System reset, activate PLL with MSI as source */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSI;
   RCC_OscInitStruct.MSIState = RCC_MSI_ON;
-  RCC_OscInitStruct.MSICalibrationValue = 0;
   RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
-  HAL_RCC_OscConfig(&RCC_OscInitStruct);
-
-    /**Initializes the CPU, AHB and APB busses clocks 
-    */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
+  RCC_OscInitStruct.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
+  RCC_OscInitStruct.PLL.PLLM = 1;
+  RCC_OscInitStruct.PLL.PLLN = 40;
+  RCC_OscInitStruct.PLL.PLLR = 2;
+  RCC_OscInitStruct.PLL.PLLP = 7;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
+  if(HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    /* Initialization Error */
+    while(1);
+  }
+  
+  /* Select PLL as system clock source and configure the HCLK, PCLK1 and PCLK2 
+     clocks dividers */
+  RCC_ClkInitStruct.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2);
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-
-  HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0);
-
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
-  PeriphClkInit.AdcClockSelection = RCC_ADCCLKSOURCE_PLLSAI1;
-  PeriphClkInit.PLLSAI1.PLLSAI1Source = RCC_PLLSOURCE_MSI;
-  PeriphClkInit.PLLSAI1.PLLSAI1M = 1;
-  PeriphClkInit.PLLSAI1.PLLSAI1N = 16;
-  PeriphClkInit.PLLSAI1.PLLSAI1P = RCC_PLLP_DIV7;
-  PeriphClkInit.PLLSAI1.PLLSAI1Q = RCC_PLLQ_DIV2;
-  PeriphClkInit.PLLSAI1.PLLSAI1R = RCC_PLLR_DIV2;
-  PeriphClkInit.PLLSAI1.PLLSAI1ClockOut = RCC_PLLSAI1_ADC1CLK;
-  HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit);
-
-    /**Configure the main internal regulator output voltage 
-    */
-  HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1);
-
-    /**Configure the Systick interrupt time 
-    */
-  HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq()/1000);
-
-    /**Configure the Systick 
-    */
-  HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
-
-  /* SysTick_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;  
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;  
+  if(HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
+  {
+    /* Initialization Error */
+    while(1);
+  }
 }
 
 /***********************************************************************************
@@ -919,8 +538,9 @@ static void TIM1_Init(void)
 {
   //declares some structs for init purposes
   TIM_ClockConfigTypeDef sClockSourceConfig;
+  TIM_MasterConfigTypeDef sMasterConfig;
   TIM_OC_InitTypeDef sConfigOC;
-
+  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig;
 
 	//sets up the base timer 
   htim1.Instance = TIM1;
@@ -939,6 +559,12 @@ static void TIM1_Init(void)
 	//enables the PWM functionality
   HAL_TIM_PWM_Init(&htim1);
 
+  //does some shit that I haven't figured out yet
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig);
+
   //configures the PWM settings and loads it to all 4 channels in use
   sConfigOC.OCMode = TIM_OCMODE_PWM1;
   sConfigOC.Pulse = 0;
@@ -952,8 +578,24 @@ static void TIM1_Init(void)
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
 
+	//does some other shit that Im not sure about
+  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
+  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
+  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+  sBreakDeadTimeConfig.DeadTime = 0;
+  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+  sBreakDeadTimeConfig.BreakFilter = 0;
+  sBreakDeadTimeConfig.Break2State = TIM_BREAK2_DISABLE;
+  sBreakDeadTimeConfig.Break2Polarity = TIM_BREAK2POLARITY_HIGH;
+  sBreakDeadTimeConfig.Break2Filter = 0;
+  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
+  HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig);
+
+	//configures the Pins and starts the timer clock
+  //HAL_TIM_MspPostInit(&htim1);
 	
-	//starts the timer and enables the PWM Channels
+	//starts the timer
 	HAL_TIM_Base_Start(&htim1); 
 	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1); 
 	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); 
@@ -978,69 +620,41 @@ static void GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
-  // Sets the digital output pins to LOW before enabling them
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2|GPIO_PIN_6|GPIO_PIN_7, GPIO_PIN_RESET);
 
-
 	/* Configure GPIO pins : PA0 PA1 PA3 PA4 PA5 */
-	GPIO_InitStruct.Pin   = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5;
+	GPIO_InitStruct.Pin   = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_3 |
+	                        GPIO_PIN_4 | GPIO_PIN_5;
 	GPIO_InitStruct.Mode  = GPIO_MODE_ANALOG;
 	GPIO_InitStruct.Pull  = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
 	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-	//LED Output pin config
+	
   /*Configure GPIO pins : PA2 PA6 PA7 */
   GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_6|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-	
-	//On Board LED Output pin config
-  /*Configure GPIO pins : PB3 */
-  GPIO_InitStruct.Pin = GPIO_PIN_3;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-	//EXTI input pin config
   /*Configure GPIO pins : PB0 PB1 PB4 PB5 */
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4|GPIO_PIN_5;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-	//Button Digital Input pin config
   /*Configure GPIO pin : PA12 */
   GPIO_InitStruct.Pin = GPIO_PIN_12;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-	//Switch Digital Input pin config
   /*Configure GPIO pins : PB6 PB7 */
   GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-	
-	//PWM pin config
-	/*Configure GPIO pins : PA8 PA9 PA10 PA11 */
-	//GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
-  //GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  //GPIO_InitStruct.Pull = GPIO_NOPULL;
-	//GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
-	//GPIO_InitStruct.Alternate = GPIO_AF1_TIM1;
-  
-  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 }
 
@@ -1083,6 +697,8 @@ static void analogRead(void)
   sConfig.SingleDiff   = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset       = 0;
+	
+	
 	
 	/* Poll for conversions */
 	for(int conv_index = 0; conv_index < 5; conv_index++)
@@ -1242,29 +858,25 @@ Status     :  Complete with the current implementation
 //Encoder Handler for Right A
 void EXTI0_IRQHandler(void)
 {
-  enCountRight++;
-	HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);//for testing
+    enCountRight++;
 }
 
 //Encoder Handler for Right B
 void EXTI1_IRQHandler(void)
 {
-  enCountRight++;
-	HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);//for testing
+    enCountRight++;
 }
 
 //Encoder Handler for Left A
 void EXTI4_IRQHandler(void)
 {
-  enCountLeft++;
-	HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);//for testing
+    enCountLeft++;
 }
 
 //Encoder Handler for Left B
 void EXTI5_9_IRQHandler(void)
 {
-  enCountLeft++;
-	HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);//for testing
+    enCountLeft++;
 }
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
