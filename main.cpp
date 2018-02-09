@@ -23,7 +23,7 @@
 #define SOUTH 0x2
 #define WEST 0x3
 
-#define BASE_SPEED 60
+#define BASE_SPEED 5
 
 ADC_HandleTypeDef hadc1;
 TIM_HandleTypeDef htim1;
@@ -81,13 +81,15 @@ map MAP [MAP_SIZE][MAP_SIZE] = {};
 
 /* Private function prototypes -----------------------------------------------*/
 void TEST(void);
+void tf1(void);
+void tf2(void);
+void tf3(void);
 
 void SystemClock_Config(void);
 static void GPIO_Init(void);
 static void ADC1_Init(void);
 static void TIM1_Init(void);
 static void EXTI_Init(void);
-static void Struct_Init(void);
 
                                     
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
@@ -116,7 +118,7 @@ int main(void)
 
   /* Configure the system clock */
   SystemClock_Config();
-
+	
   /* Initialize all configured peripherals */
   GPIO_Init();
   ADC1_Init();
@@ -156,7 +158,7 @@ int main(void)
 	turnAroundMove.moveType = turnAround;
 	
 	
-	//TEST();
+	TEST();
 
 	if((GPIOB->IDR&0x80) == 0x80)
 	{
@@ -213,9 +215,61 @@ Description:  Does Test things
 Inputs     :  None
 Outputs    :  None
 ***********************************************************************************/
-void TEST()
+void TEST(void)
 {
-	while(1);
+	while(1)
+	{
+		tf3();
+		waitForButton();
+	}
+}
+
+//passed all tests, All LEDs are verified working
+void tf1(void)
+{
+	//pin B3 for onboard LED, mm board LEDS are A2 A6 A7
+	HAL_GPIO_WritePin(GPIOA,GPIO_PIN_7,GPIO_PIN_SET);
+	HAL_Delay(500);
+	HAL_GPIO_WritePin(GPIOA,GPIO_PIN_7,GPIO_PIN_RESET);
+	HAL_Delay(500);
+}
+
+//Passed all Tests, All switches and buttons verified working
+void tf2(void)
+{
+	//A12= button , switches are B6 and B7
+	if((GPIOB->IDR&0x80)==0x0000)
+	{
+		HAL_GPIO_WritePin(GPIOB,GPIO_PIN_3,GPIO_PIN_SET);
+	}
+	else
+	{
+		HAL_GPIO_WritePin(GPIOB,GPIO_PIN_3,GPIO_PIN_RESET);
+	}
+}
+
+//Passed all Tests, All PWMs are configurable
+void tf3(void)
+{
+	TIM_OC_InitTypeDef sConfigOC;
+	
+	sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 200;// duty cycle = (1000-pulse)/1000    500 = 50%, 800 = 20%, 200 = 80%
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1);
+	sConfigOC.Pulse = 400;
+  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
+	sConfigOC.Pulse = 600;
+  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
+	sConfigOC.Pulse = 800;
+  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
+	
+	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1); 
+	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); 
+	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_3); 
+	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_4); 
 }
 
 /***********************************************************************************
@@ -224,12 +278,12 @@ Description:  reads the ADCs and populates the current cell with wall data
 Inputs     :  None
 Outputs    :  None
 
-Status     :  Complete, works as intended for the current implementation
+Status     :  Doesn't populate walls in adjacent cells, may not be an issue... Probably works.
 ***********************************************************************************/
 void mapCell(void)
 {
 
-	if(MAP[currentXpos][currentYpos].scanned == 1) //if current map position has not been mapped
+	if(MAP[currentXpos][currentYpos].scanned == 0) //if current map position has not been mapped
 	{ 
 		MAP[currentXpos][currentYpos].scanned = 1;
 		analogRead();
@@ -378,11 +432,29 @@ Description:  Sets the PWMs up for the next movement
 Inputs     :  move
 Outputs    :  None
 
-Status     :  Not Started
+Status     :  Probably works? !!!untested!!!
 ***********************************************************************************/
 void setMotorMove(movementVector move)
 {
+	TIM_OC_InitTypeDef sConfigOC;
 	
+	sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = move.pwmL1;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1);
+	sConfigOC.Pulse = move.pwmR1;
+  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
+	sConfigOC.Pulse = move.pwmR2;
+  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
+	sConfigOC.Pulse = move.pwmL2;
+  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
+	
+	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1); 
+	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); 
+	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_3); 
+	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_4); 
 }
 
 /***********************************************************************************
@@ -846,7 +918,7 @@ void SystemClock_Config(void)
 
     /**Configure the Systick interrupt time 
     */
-  HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq()/1000);
+  //HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq()/1000);
 
     /**Configure the Systick 
     */
@@ -866,12 +938,25 @@ Status     :  Works!
 ***********************************************************************************/
 static void ADC1_Init(void)
 {
+	GPIO_InitTypeDef GPIO_InitStruct;
+  ADC_ChannelConfTypeDef sConfig;
+	
+	// Enable clock for GPIOA
+	__HAL_RCC_GPIOA_CLK_ENABLE();
 	
 	// Enable ADC Clock
 	__HAL_RCC_ADC_CLK_ENABLE();
 	
 	// ADC Periph interface clock configuration
   __HAL_RCC_ADC_CONFIG(RCC_ADCCLKSOURCE_SYSCLK);
+	
+	// Configure GPIOA
+	GPIO_InitStruct.Pin   = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_3 |
+	                        GPIO_PIN_4 | GPIO_PIN_5;
+	GPIO_InitStruct.Mode  = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull  = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 	
 	/* Configure ADC1 */
 	hadc1.Instance = ADC1;
@@ -887,17 +972,17 @@ static void ADC1_Init(void)
   hadc1.Init.ClockPrescaler        = ADC_CLOCK_ASYNC_DIV1;
   hadc1.Init.Resolution            = ADC_RESOLUTION_12B;
   hadc1.Init.DataAlign             = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.ScanConvMode          = DISABLE;
+  hadc1.Init.ScanConvMode          = ADC_SCAN_ENABLE;       // Scan through all channels based on rank
   hadc1.Init.EOCSelection          = ADC_EOC_SINGLE_CONV;
   hadc1.Init.LowPowerAutoWait      = DISABLE;
-  hadc1.Init.ContinuousConvMode    = DISABLE;
-  hadc1.Init.NbrOfConversion       = 1;
+  hadc1.Init.ContinuousConvMode    = ENABLE;
+  hadc1.Init.NbrOfConversion       = 5;                     // 5 channels to scan through
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.NbrOfDiscConversion   = 1;
   hadc1.Init.ExternalTrigConv      = ADC_SOFTWARE_START;
   hadc1.Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc1.Init.DMAContinuousRequests = DISABLE;
-  hadc1.Init.Overrun               = ADC_OVR_DATA_PRESERVED;
+  hadc1.Init.Overrun               = ADC_OVR_DATA_OVERWRITTEN;
   hadc1.Init.OversamplingMode      = DISABLE;
   
 	if(HAL_ADC_Init(&hadc1)!=HAL_OK)
@@ -905,6 +990,67 @@ static void ADC1_Init(void)
 		/* Error occured */
 		while(1){}
 	}
+
+  //Configure Channel 5, PA0, IR_BL
+  sConfig.Channel      = ADC_CHANNEL_5;
+  sConfig.Rank         = ADC_REGULAR_RANK_1;       // scanning will be done in order
+  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
+  sConfig.SingleDiff   = ADC_SINGLE_ENDED;
+  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+  sConfig.Offset       = 0;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 6, PA1, IR_FL
+  sConfig.Channel      = ADC_CHANNEL_6;
+  sConfig.Rank         = ADC_REGULAR_RANK_2;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 8, PA3, IR_M
+  sConfig.Channel      = ADC_CHANNEL_8;
+  sConfig.Rank         = ADC_REGULAR_RANK_3;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 9, PA4, IR_FR
+  sConfig.Channel      = ADC_CHANNEL_9;
+  sConfig.Rank         = ADC_REGULAR_RANK_4;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	//Configure Channel 10, PA5, IR_BR
+  sConfig.Channel      = ADC_CHANNEL_10;
+  sConfig.Rank         = ADC_REGULAR_RANK_5;
+  
+	if(HAL_ADC_ConfigChannel(&hadc1, &sConfig)!=HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
+	}
+	
+	/* Run the ADC calibration in single-ended mode */
+  if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
+  {
+    /* Calibration Error */
+    while(1){}
+  }
 }
 
 /***********************************************************************************
@@ -918,43 +1064,39 @@ Status     :  Probably works? Auto-generated code
 static void TIM1_Init(void)
 {
   //declares some structs for init purposes
-  TIM_ClockConfigTypeDef sClockSourceConfig;
   TIM_OC_InitTypeDef sConfigOC;
-
+  
 
 	//sets up the base timer 
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 0;
+  htim1.Init.Prescaler = 4;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 256;
+  htim1.Init.Period = 1000;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
-  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   HAL_TIM_Base_Init(&htim1);
   
 	//sets the reference clock source
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig);
+  //sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  //HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig);
 
 	//enables the PWM functionality
-  HAL_TIM_PWM_Init(&htim1);
+  //HAL_TIM_PWM_Init(&htim1);
 
   //configures the PWM settings and loads it to all 4 channels in use
   sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+  sConfigOC.Pulse = 1000;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
-  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1);
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
   HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
 
 	
-	//starts the timer and enables the PWM Channels
-	HAL_TIM_Base_Start(&htim1); 
+	//starts the timer and enables the PWM Channels 
+	HAL_TIM_Base_Start(&htim1);
 	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1); 
 	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); 
 	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_3); 
@@ -981,14 +1123,6 @@ static void GPIO_Init(void)
   // Sets the digital output pins to LOW before enabling them
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2|GPIO_PIN_6|GPIO_PIN_7, GPIO_PIN_RESET);
 
-
-	/* Configure GPIO pins : PA0 PA1 PA3 PA4 PA5 */
-	GPIO_InitStruct.Pin   = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5;
-	GPIO_InitStruct.Mode  = GPIO_MODE_ANALOG;
-	GPIO_InitStruct.Pull  = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
 	//LED Output pin config
   /*Configure GPIO pins : PA2 PA6 PA7 */
   GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_6|GPIO_PIN_7;
@@ -1009,7 +1143,7 @@ static void GPIO_Init(void)
   /*Configure GPIO pins : PB0 PB1 PB4 PB5 */
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4|GPIO_PIN_5;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
@@ -1017,7 +1151,7 @@ static void GPIO_Init(void)
   /*Configure GPIO pin : PA12 */
   GPIO_InitStruct.Pin = GPIO_PIN_12;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
@@ -1025,21 +1159,21 @@ static void GPIO_Init(void)
   /*Configure GPIO pins : PB6 PB7 */
   GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 	
 	//PWM pin config
 	/*Configure GPIO pins : PA8 PA9 PA10 PA11 */
-	//GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
-  //GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  //GPIO_InitStruct.Pull = GPIO_NOPULL;
-	//GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
-	//GPIO_InitStruct.Alternate = GPIO_AF1_TIM1;
-  
-  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
+	GPIO_InitStruct.Alternate = GPIO_AF1_TIM1;
+  
+  //GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
+  //GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  //GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 }
@@ -1076,158 +1210,45 @@ Status     :  Seems to work.  Could test if struct is properly populated.
 ***********************************************************************************/
 static void analogRead(void)
 {
-	ADC_ChannelConfTypeDef sConfig;
-	
-	sConfig.Rank         = ADC_REGULAR_RANK_1;  
-	sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
-  sConfig.SingleDiff   = ADC_SINGLE_ENDED;
-  sConfig.OffsetNumber = ADC_OFFSET_NONE;
-  sConfig.Offset       = 0;
+	/* Start the conversion process */
+  if (HAL_ADC_Start(&hadc1) != HAL_OK)
+  {
+    /* Start Conversation Error */
+    while(1){}
+  }
 	
 	/* Poll for conversions */
 	for(int conv_index = 0; conv_index < 5; conv_index++)
 	{
-		/* store converted value based on set rank in ADC1_Init */
-		switch(conv_index)
+		if(HAL_ADC_PollForConversion(&hadc1, 10) != HAL_OK)
 		{
-			case 0:  //Configure Channel 5, PA0, IR_BL
-               sConfig.Channel      = ADC_CHANNEL_5;
-               HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-			         /* Run the ADC calibration in single-ended mode */
-               if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
-               {
-                  /* Calibration Error */
-                  while(1){}
-               }
-			         /* Start the conversion process */
-               if (HAL_ADC_Start(&hadc1) != HAL_OK)
-               {
-                  /* Start Conversation Error */
-                  while(1){}
-               }
-			         if(HAL_ADC_PollForConversion(&hadc1, 50) != HAL_OK)
-		           {
-			            /* loop if error occured*/
-			            while(1){}
-		           }
-			         analog1.leftBackIRVal = HAL_ADC_GetValue(&hadc1);
-							 /* End conversion process */
-	             if (HAL_ADC_Stop(&hadc1) != HAL_OK)
-	             {
-		              /* Error occured */
-		              while(1){}
-	             }
-				break;
-			case 1:  //Configure Channel 6, PA1, IR_FL
-               sConfig.Channel      = ADC_CHANNEL_6;
-               sConfig.Rank         = ADC_REGULAR_RANK_1;
-		           HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-			         /* Run the ADC calibration in single-ended mode */
-               if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
-               {
-                  /* Calibration Error */
-                  while(1){}
-               }
-			         if (HAL_ADC_Start(&hadc1) != HAL_OK)
-               {
-                  /* Start Conversation Error */
-                  while(1){}
-               }
-							 if(HAL_ADC_PollForConversion(&hadc1, 50) != HAL_OK)
-		           {
-			            /* loop if error occured*/
-			            while(1){}
-		           }
-			         analog1.leftFrontIRVal = HAL_ADC_GetValue(&hadc1);
-							 /* End conversion process */
-	             if (HAL_ADC_Stop(&hadc1) != HAL_OK)
-	             {
-		              /* Error occured */
-		              while(1){}
-	             }
-				break;
-			case 2:  //Configure Channel 8, PA3, IR_M
-               sConfig.Channel      = ADC_CHANNEL_8;
-	             HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-			         /* Run the ADC calibration in single-ended mode */
-               if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
-               {
-                  /* Calibration Error */
-                  while(1){}
-               }
-			         if (HAL_ADC_Start(&hadc1) != HAL_OK)
-               {
-                  /* Start Conversation Error */
-                  while(1){}
-               }
-			         if(HAL_ADC_PollForConversion(&hadc1, 50) != HAL_OK)
-		           {
-			            /* loop if error occured*/
-			            while(1){}
-		           }
-			         analog1.middleIRVal = HAL_ADC_GetValue(&hadc1);
-							 /* End conversion process */
-	             if (HAL_ADC_Stop(&hadc1) != HAL_OK)
-	             {
-		              /* Error occured */
-		              while(1){}
-	             }
-				break;
-			case 3:  //Configure Channel 9, PA4, IR_FR
-               sConfig.Channel      = ADC_CHANNEL_9;
-	             HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-			         /* Run the ADC calibration in single-ended mode */
-               if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
-               {
-                  /* Calibration Error */
-                  while(1){}
-               }
-			         if (HAL_ADC_Start(&hadc1) != HAL_OK)
-               {
-                  /* Start Conversation Error */
-                  while(1){}
-               }
-			         if(HAL_ADC_PollForConversion(&hadc1, 50) != HAL_OK)
-		           {
-			            /* loop if error occured*/
-			            while(1){}
-		           }
-			         analog1.rightFrontIRVal = HAL_ADC_GetValue(&hadc1);
-							 /* End conversion process */
-	             if (HAL_ADC_Stop(&hadc1) != HAL_OK)
-	             {
-		              /* Error occured */
-		              while(1){}
-	             }
-				break;
-			case 4:  //Configure Channel 10, PA5, IR_BR
-               sConfig.Channel      = ADC_CHANNEL_10;
-	             HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-			         /* Run the ADC calibration in single-ended mode */
-               if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
-               {
-                  /* Calibration Error */
-                  while(1){}
-               }
-			         if (HAL_ADC_Start(&hadc1) != HAL_OK)
-               {
-                  /* Start Conversation Error */
-                  while(1){}
-               }
-			         if(HAL_ADC_PollForConversion(&hadc1, 50) != HAL_OK)
-		           {
-			            /* loop if error occured*/
-			            while(1){}
-		           }
-			         analog1.rightBackIRVal = HAL_ADC_GetValue(&hadc1);
-							 /* End conversion process */
-	             if (HAL_ADC_Stop(&hadc1) != HAL_OK)
-	             {
-		              /* Error occured */
-		              while(1){}
-	             }
-				break;
+			/* loop if error occured*/
+			while(1){}
 		}
+		else
+		{
+			/* store converted value based on set rank in ADC1_Init */
+			switch(conv_index)
+			{
+				case 0:  analog1.leftBackIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 1:  analog1.leftFrontIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 2:  analog1.middleIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 3:  analog1.rightFrontIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+				case 4:  analog1.rightBackIRVal = HAL_ADC_GetValue(&hadc1);
+					break;
+			}
+		}
+	}
+	
+	/* End conversion process */
+	if (HAL_ADC_Stop(&hadc1) != HAL_OK)
+	{
+		/* Error occured */
+		while(1){}
 	}
 }
 
