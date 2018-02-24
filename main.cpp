@@ -15,15 +15,14 @@
 #define WALL_THRESHOLD_S 500
 #define WALL_THRESHOLD_L 3000
 #define ONE_SQUARE 100
-#define TURN_INSIDE 10
-#define TURN_OUTSIDE 200
+#define TURN_90 100
 #define TURN_AROUND 150
 #define NORTH 0x0
 #define EAST 0x1
 #define SOUTH 0x2
 #define WEST 0x3
 
-#define BASE_SPEED 5
+#define BASE_SPEED 800
 
 ADC_HandleTypeDef hadc1;
 TIM_HandleTypeDef htim1;
@@ -42,10 +41,10 @@ static uint8_t defaultDir;
 enum Movement {noMove,forward,turnRight,turnLeft,turnAround};
 
 struct movementVector {
-  uint8_t pwmR1;
-  uint8_t pwmR2;
-  uint8_t pwmL1;
-  uint8_t pwmL2;
+  uint16_t pwmR1;
+  uint16_t pwmR2;
+  uint16_t pwmL1;
+  uint16_t pwmL2;
   uint16_t rightMotorSteps;
   uint16_t leftMotorSteps;
   Movement moveType;
@@ -135,18 +134,18 @@ int main(void)
 	
 	turnRightMove.pwmL1 = BASE_SPEED;
 	turnRightMove.pwmL2 = 0;
-	turnRightMove.pwmR1 = BASE_SPEED*(TURN_OUTSIDE/TURN_INSIDE);
-	turnRightMove.pwmR2 = 0;
-	turnRightMove.leftMotorSteps = TURN_OUTSIDE;
-	turnRightMove.rightMotorSteps = TURN_INSIDE;
+	turnRightMove.pwmR1 = 0;
+	turnRightMove.pwmR2 = BASE_SPEED;
+	turnRightMove.leftMotorSteps = TURN_90;
+	turnRightMove.rightMotorSteps = TURN_90;
 	turnRightMove.moveType = turnRight;
 	
-	turnLeftMove.pwmL1 = BASE_SPEED*(TURN_OUTSIDE/TURN_INSIDE);
-	turnLeftMove.pwmL2 = 0;
+	turnLeftMove.pwmL1 = 0;
+	turnLeftMove.pwmL2 = BASE_SPEED;
 	turnLeftMove.pwmR1 = BASE_SPEED;
 	turnLeftMove.pwmR2 = 0;
-	turnLeftMove.leftMotorSteps = TURN_INSIDE;
-	turnLeftMove.rightMotorSteps = TURN_OUTSIDE;
+	turnLeftMove.leftMotorSteps = TURN_90;
+	turnLeftMove.rightMotorSteps = TURN_90;
 	turnLeftMove.moveType = turnLeft;
 	
 	turnAroundMove.pwmL1 = BASE_SPEED;
@@ -219,8 +218,13 @@ void TEST(void)
 {
 	while(1)
 	{
-		tf3();
-		waitForButton();
+		HAL_GPIO_TogglePin(GPIOA,GPIO_PIN_2);
+		setMotorMove(forwardMove);
+		HAL_GPIO_TogglePin(GPIOA,GPIO_PIN_6);
+		HAL_Delay(1000);
+		setMotorMove(turnRightMove);
+		HAL_GPIO_TogglePin(GPIOA,GPIO_PIN_7);
+		HAL_Delay(1000);
 	}
 }
 
@@ -251,25 +255,10 @@ void tf2(void)
 //Passed all Tests, All PWMs are configurable
 void tf3(void)
 {
-	TIM_OC_InitTypeDef sConfigOC;
-	
-	sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 200;// duty cycle = (1000-pulse)/1000    500 = 50%, 800 = 20%, 200 = 80%
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
-  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1);
-	sConfigOC.Pulse = 400;
-  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
-	sConfigOC.Pulse = 600;
-  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
-	sConfigOC.Pulse = 800;
-  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
-	
-	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1); 
-	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); 
-	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_3); 
-	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_4); 
+	setMotorMove(forwardMove);
+	HAL_Delay(1000);
+	setMotorMove(turnRightMove);
+	HAL_Delay(1000);
 }
 
 /***********************************************************************************
@@ -390,7 +379,6 @@ void exeMoveVector(void)
 		moveStack.pop_back();             //deletes the movement we loaded off the stack
 		rightMotorFinish = 0;             //clears movement complete flags
 		leftMotorFinish = 0;
-		resetEnCounts();                  //resets the encoder counters 
 		setMotorMove(currentMove);        //sets the PWMs for the movement
 		setNewPos(currentMove.moveType);  //sets the position of the uM to the destination
 		
@@ -409,6 +397,7 @@ void exeMoveVector(void)
 				leftMotorFinish = 1;
 			}
 		}
+		
 	}
 }
 
@@ -437,6 +426,7 @@ Status     :  Probably works? !!!untested!!!
 void setMotorMove(movementVector move)
 {
 	TIM_OC_InitTypeDef sConfigOC;
+	resetEnCounts();
 	
 	sConfigOC.OCMode = TIM_OCMODE_PWM1;
   sConfigOC.Pulse = move.pwmL1;
@@ -1144,7 +1134,7 @@ static void GPIO_Init(void)
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4|GPIO_PIN_5;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 	//Button Digital Input pin config
@@ -1174,7 +1164,7 @@ static void GPIO_Init(void)
   //GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
   //GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   //GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  //HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 }
 
@@ -1188,13 +1178,13 @@ Status     :  I made this but don't know if it works
 ***********************************************************************************/
 static void EXTI_Init(void)
 {
-	HAL_NVIC_SetPriority(EXTI0_IRQn, 2, 0);
+	HAL_NVIC_SetPriority(EXTI0_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
-	HAL_NVIC_SetPriority(EXTI1_IRQn, 2, 0);
+	HAL_NVIC_SetPriority(EXTI1_IRQn, 7, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
-	HAL_NVIC_SetPriority(EXTI4_IRQn, 2, 0);
+	HAL_NVIC_SetPriority(EXTI4_IRQn, 10, 0);
   HAL_NVIC_EnableIRQ(EXTI4_IRQn);
-	HAL_NVIC_SetPriority(EXTI9_5_IRQn, 2, 0);
+	HAL_NVIC_SetPriority(EXTI9_5_IRQn, 23, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 }
 
@@ -1258,32 +1248,38 @@ Description:  When an external interrupt occurs, run the code listed
 Inputs     :  None
 Outputs    :  None
 
-Status     :  Complete with the current implementation
+Status     :  not tested
 ***********************************************************************************/
 //Encoder Handler for Right A
-void EXTI0_IRQHandler(void)
+
+
+extern "C" void EXTI0_IRQHandler(void)
 {
+	__HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_0);
   enCountRight++;
 	HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);//for testing
 }
 
 //Encoder Handler for Right B
-void EXTI1_IRQHandler(void)
+extern "C" void EXTI1_IRQHandler(void)
 {
+	__HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_1);
   enCountRight++;
 	HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);//for testing
 }
 
 //Encoder Handler for Left A
-void EXTI4_IRQHandler(void)
+extern "C" void EXTI4_IRQHandler(void)
 {
+	__HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_4);
   enCountLeft++;
 	HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);//for testing
 }
 
 //Encoder Handler for Left B
-void EXTI5_9_IRQHandler(void)
+extern "C" void EXTI9_5_IRQHandler(void)
 {
+	__HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9);
   enCountLeft++;
 	HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);//for testing
 }
