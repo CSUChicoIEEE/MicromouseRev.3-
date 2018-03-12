@@ -10,20 +10,21 @@
 #include "stm32l4xx_hal.h"
 
 /* Private variables ---------------------------------------------------------*/
-#define MAP_SIZE 16
+#define MAP_SIZE 5
+#define MAP_CENTER 3
 #define MOVE_LIST_SIZE 500
 #define FLOOD_LIST_SIZE 100
-#define WALL_THRESHOLD_S 500
+#define WALL_THRESHOLD_S 1000
 #define WALL_THRESHOLD_L 3000
-#define ONE_SQUARE 1000
-#define TURN_90 1000
-#define TURN_AROUND 1000
+#define ONE_SQUARE 1550
+#define TURN_90 560
+#define TURN_AROUND 1120
 #define NORTH 0x0
 #define EAST 0x1
 #define SOUTH 0x2
 #define WEST 0x3
 
-#define BASE_SPEED 800
+#define BASE_SPEED 1600
 
 ADC_HandleTypeDef hadc1;
 TIM_HandleTypeDef htim1;
@@ -34,6 +35,8 @@ static volatile uint32_t enCountRight = 0;
 static volatile uint32_t enCountLeft = 0;
 static bool rightMotorFinish = 0;
 static bool leftMotorFinish = 0;
+
+static uint16_t speedTuneR = 5;
 
 static uint8_t currentXpos;
 static uint8_t currentYpos;
@@ -80,14 +83,12 @@ struct FloodList {
 
 struct MoveList {
 	struct movementVector list [MOVE_LIST_SIZE];
-	uint16_t topIndex;
-	uint16_t bottomIndex;
-	uint16_t sizeIndex;
+	uint16_t index;
 	bool empty;
 	bool full;
 };
 
-static struct movementVector testMove;
+static struct movementVector resetMove;
 static struct movementVector forwardMove;
 static struct movementVector turnRightMove;
 static struct movementVector turnLeftMove;
@@ -98,7 +99,8 @@ static struct MoveList moveList;
 
 struct analogValues analog1;
 
-struct map MAP [MAP_SIZE][MAP_SIZE];    
+struct map MAP [MAP_SIZE][MAP_SIZE]; 
+struct map resetCell;
 
 /* Private function prototypes -----------------------------------------------*/
 void TEST(void);
@@ -112,6 +114,9 @@ static void ADC1_Init(void);
 static void TIM1_Init(void);
 static void EXTI_Init(void);
 
+static void StructInit(void);
+static void listStructInit(void);
+static void mapArrayInit(void);
                                     
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
                                 
@@ -154,48 +159,22 @@ int main(void)
   TIM1_Init();
 	EXTI_Init();
 	
-//	forwardMove.pwmL1 = 1000;
-//	forwardMove.pwmL2 = BASE_SPEED;
-//	forwardMove.pwmR1 = BASE_SPEED;
-//	forwardMove.pwmR2 = 1000;
-//	forwardMove.leftMotorSteps = ONE_SQUARE;
-//	forwardMove.rightMotorSteps = ONE_SQUARE;
-//	forwardMove.moveType = forward;
-//	
-//	turnRightMove.pwmL1 = BASE_SPEED;
-//	turnRightMove.pwmL2 = 1000;
-//	turnRightMove.pwmR1 = BASE_SPEED;
-//	turnRightMove.pwmR2 = 1000;
-//	turnRightMove.leftMotorSteps = TURN_90;
-//	turnRightMove.rightMotorSteps = TURN_90;
-//	turnRightMove.moveType = turnRight;
-//	
-//	turnLeftMove.pwmL1 = 0;
-//	turnLeftMove.pwmL2 = BASE_SPEED;
-//	turnLeftMove.pwmR1 = BASE_SPEED;
-//	turnLeftMove.pwmR2 = 0;
-//	turnLeftMove.leftMotorSteps = TURN_90;
-//	turnLeftMove.rightMotorSteps = TURN_90;
-//	turnLeftMove.moveType = turnLeft;
-//	
-//	turnAroundMove.pwmL1 = BASE_SPEED;
-//	turnAroundMove.pwmL2 = 0;
-//	turnAroundMove.pwmR1 = 0;
-//	turnAroundMove.pwmR2 = BASE_SPEED;
-//	turnAroundMove.leftMotorSteps = TURN_AROUND;
-//	turnAroundMove.rightMotorSteps = TURN_AROUND;
-//	turnAroundMove.moveType = turnAround;
-//	
-//	stopMotorMove();
+	StructInit();
+	mapArrayInit();
+	listStructInit();
+	
+	stopMotorMove();
 	TEST();
 
 	if((GPIOB->IDR&0x80) == 0x80)
 	{
-		defaultDir = WEST;
+		defaultDir = EAST;
+		MAP[0][0].walls = 0x01;
 	}
 	else
 	{
 		defaultDir = NORTH;
+		MAP[0][0].walls = 0x02;
 	}
 
 	currentXpos = 0;
@@ -255,16 +234,9 @@ Outputs    :  None
 ***********************************************************************************/
 void TEST(void)
 {
-		while(1)
-		{
-			analogRead();
-			
-		}
-	
 	while(1)
 	{
-		moveListAdd(forwardMove);
-		moveListAdd(turnRightMove);
+		moveListAdd(turnAroundMove);
 		exeMoveVector();
 		waitForButton();
 	}
@@ -297,8 +269,6 @@ void tf2(void)
 //Passed all Tests, All PWMs are configurable
 void tf3(void)
 {
-	setMotorMove(testMove);
-	HAL_Delay(1000);
 	
 }
 
@@ -320,59 +290,57 @@ void mapCell(void)
 		switch(direction) 
 		{
 			case NORTH:
-				if(analog1.middleIRVal<=WALL_THRESHOLD_S)
+				if(analog1.middleIRVal>=WALL_THRESHOLD_S)
 				{
 					MAP[currentXpos][currentYpos].walls|=0x08;
 				}
-				if(analog1.leftFrontIRVal<=WALL_THRESHOLD_S) 
+				if(analog1.leftFrontIRVal>=WALL_THRESHOLD_S) 
 				{
 					MAP[currentXpos][currentYpos].walls|=0x01;
 				}
-				if(analog1.rightFrontIRVal<=WALL_THRESHOLD_S) 
+				if(analog1.rightFrontIRVal>=WALL_THRESHOLD_S) 
 				{
 					MAP[currentXpos][currentYpos].walls|=0x04;
 				}
 				break;
 			case WEST:
-				if(analog1.middleIRVal<=WALL_THRESHOLD_S) 
+				if(analog1.middleIRVal>=WALL_THRESHOLD_S) 
 				{
-
 					MAP[currentXpos][currentYpos].walls|=0x01;
 				}
-				if(analog1.leftFrontIRVal<=WALL_THRESHOLD_S) 
+				if(analog1.leftFrontIRVal>=WALL_THRESHOLD_S) 
 				{
 					MAP[currentXpos][currentYpos].walls|=0x02;
 				}
-				if(analog1.rightFrontIRVal<=WALL_THRESHOLD_S) 
+				if(analog1.rightFrontIRVal>=WALL_THRESHOLD_S) 
 				{
 					MAP[currentXpos][currentYpos].walls|=0x08;
 				}
 				break;
 			case SOUTH:
-				if(analog1.middleIRVal<=WALL_THRESHOLD_S) 
+				if(analog1.middleIRVal>=WALL_THRESHOLD_S) 
 				{
 					MAP[currentXpos][currentYpos].walls|=0x02;
 				}
-				if(analog1.leftFrontIRVal<=WALL_THRESHOLD_S) 
+				if(analog1.leftFrontIRVal>=WALL_THRESHOLD_S) 
 				{
 					MAP[currentXpos][currentYpos].walls|=0x04;
 				}
-				if(analog1.rightFrontIRVal<=WALL_THRESHOLD_S) 
+				if(analog1.rightFrontIRVal>=WALL_THRESHOLD_S) 
 				{
 					MAP[currentXpos][currentYpos].walls|=0x01;
 				}
 				break;
 			case EAST:
-				if(analog1.middleIRVal<=WALL_THRESHOLD_S) 
+				if(analog1.middleIRVal>=WALL_THRESHOLD_S) 
 				{
-
 					MAP[currentXpos][currentYpos].walls|=0x04;
 				}
-				if(analog1.leftFrontIRVal<=WALL_THRESHOLD_S) 
+				if(analog1.leftFrontIRVal>=WALL_THRESHOLD_S) 
 				{
 					MAP[currentXpos][currentYpos].walls|=0x08;
 				}
-				if(analog1.rightFrontIRVal<=WALL_THRESHOLD_S) 
+				if(analog1.rightFrontIRVal>=WALL_THRESHOLD_S) 
 				{
 					MAP[currentXpos][currentYpos].walls|=0x02;
 				}
@@ -412,6 +380,7 @@ Status     :  Complete, tested
 void exeMoveVector(void)
 {
 	struct movementVector currentMove;
+	currentMove = resetMove;
 	
 	//Repeats while there is still movements on the stack to be executed
 	while(moveList.empty == false)
@@ -419,6 +388,7 @@ void exeMoveVector(void)
 		currentMove = moveListPop();      //gets the next movement to execute
 		rightMotorFinish = 0;             //clears movement complete flags
 		leftMotorFinish = 0;
+		resetEnCounts();
 		setMotorMove(currentMove);        //sets the PWMs for the movement
 		setNewPos(currentMove.moveType);  //sets the position of the uM to the destination
 		
@@ -426,9 +396,7 @@ void exeMoveVector(void)
 		while((rightMotorFinish == 0)&&(leftMotorFinish == 0))
 		{
 			///////////////////////////////////////////////
-			//
-			//movement control system goes here
-			//
+			//movement control system 
 			///////////////////////////////////////////////
 			
 			//checks to see if the movement is done
@@ -470,7 +438,6 @@ Status     :  Complete, tested
 void setMotorMove(struct movementVector move)
 {
 	TIM_OC_InitTypeDef sConfigOC;
-	resetEnCounts();
 	
 	sConfigOC.OCMode = TIM_OCMODE_PWM1;
   sConfigOC.Pulse = move.pwmL1;
@@ -561,6 +528,9 @@ void genMoveVector(void)
 {
 	//reset the fillVals so that past iterations of flood fill dont interfere
 	struct map workingCell, targetCell, previousCell;
+	workingCell = resetCell;
+	targetCell = resetCell;
+	previousCell = resetCell;
 	bool targetPosFound = 0;
 	bool turned = 0;
 	resetFillVals();
@@ -591,28 +561,28 @@ void genMoveVector(void)
 				switch(j)
 				{
 					case(0):
-						if(MAP[workingCell.xPos-1][workingCell.yPos].fillVal != 0)
+						if(MAP[workingCell.xPos-1][workingCell.yPos].fillVal == 0)
 						{
 							MAP[workingCell.xPos-1][workingCell.yPos].fillVal = (workingCell.fillVal+1);
 							floodListAdd(MAP[workingCell.xPos-1][workingCell.yPos]);
 						}
 					break;
 					case(1):
-						if(MAP[workingCell.xPos][workingCell.yPos-1].fillVal != 0)
+						if(MAP[workingCell.xPos][workingCell.yPos-1].fillVal == 0)
 						{
 							MAP[workingCell.xPos][workingCell.yPos-1].fillVal = (workingCell.fillVal+1);
 							floodListAdd(MAP[workingCell.xPos][workingCell.yPos-1]);
 						}
 					break;
 					case(2):
-						if(MAP[workingCell.xPos+1][workingCell.yPos].fillVal != 0)
+						if(MAP[workingCell.xPos+1][workingCell.yPos].fillVal == 0)
 						{
 							MAP[workingCell.xPos+1][workingCell.yPos].fillVal = (workingCell.fillVal+1);
 							floodListAdd(MAP[workingCell.xPos+1][workingCell.yPos]);
 						}
 					break;
 					case(3):
-						if(MAP[workingCell.xPos][workingCell.yPos+1].fillVal != 0)
+						if(MAP[workingCell.xPos][workingCell.yPos+1].fillVal == 0)
 						{
 							MAP[workingCell.xPos][workingCell.yPos+1].fillVal = (workingCell.fillVal+1);
 							floodListAdd(MAP[workingCell.xPos][workingCell.yPos+1]);
@@ -622,9 +592,10 @@ void genMoveVector(void)
 			}	
 		}
 	}
+	workingCell = targetCell;
 	
 	//fills the moveStack with The steps needed to get to the target cell
-	for(int i = 0;i<targetCell.fillVal;i++)
+	for(int i = 0x8000;i<targetCell.fillVal;i++)
 	{
 		//next cell West
 		if(MAP[workingCell.xPos-1][workingCell.yPos].fillVal == (workingCell.fillVal-1))
@@ -695,7 +666,7 @@ void genMoveVector(void)
 			previousCell = workingCell;
 			workingCell = MAP[workingCell.xPos][workingCell.yPos-1];
 		}
-		//next cell South
+		//next cell North
 		if(MAP[workingCell.xPos][workingCell.yPos+1].fillVal == (workingCell.fillVal-1))
 		{
 			if(previousCell.fillVal != 0)
@@ -720,6 +691,98 @@ void genMoveVector(void)
 		}
 		turned = 0;
 	}
+	//initial direction of uMouse compensation
+	switch(direction)
+	{
+		case NORTH:
+			if(previousCell.yPos == workingCell.yPos)
+			{
+				if((previousCell.xPos>workingCell.xPos)&&(turned == 0))
+				{
+					moveListAdd(turnRightMove);
+					turned = 1;
+				}
+				if((previousCell.xPos<workingCell.xPos)&&(turned == 0))
+				{
+					moveListAdd(turnLeftMove);
+					turned = 1;
+				}
+			}
+			else 
+			{
+				if(previousCell.yPos<workingCell.yPos)
+				{
+					moveListAdd(turnAroundMove);
+				}
+			}
+			break;
+		case EAST:
+			if(previousCell.xPos == workingCell.xPos)
+			{
+				if((previousCell.yPos>workingCell.yPos)&&(turned == 0))
+				{
+					moveListAdd(turnRightMove);
+					turned = 1;
+				}
+				if((previousCell.yPos<workingCell.yPos)&&(turned == 0))
+				{
+					moveListAdd(turnLeftMove);
+					turned = 1;
+				}
+			}
+			else
+			{
+				if(previousCell.xPos>workingCell.xPos)
+				{
+					moveListAdd(turnAroundMove);
+				}
+			}
+			break;
+		case SOUTH:
+			if(previousCell.yPos == workingCell.yPos)
+			{
+				if((previousCell.xPos>workingCell.xPos)&&(turned == 0))
+				{
+					moveListAdd(turnLeftMove);
+					turned = 1;
+				}
+				if((previousCell.xPos<workingCell.xPos)&&(turned == 0))
+				{
+					moveListAdd(turnRightMove);
+					turned = 1;
+				}
+			}
+			else
+			{
+				if(previousCell.yPos>workingCell.yPos)
+				{
+					moveListAdd(turnAroundMove);
+				}
+			}
+			break;
+		case WEST:
+			if(previousCell.xPos == workingCell.xPos)
+			{
+				if((previousCell.yPos>workingCell.yPos)&&(turned == 0))
+				{
+					moveListAdd(turnLeftMove);
+					turned = 1;
+				}
+				if((previousCell.yPos<workingCell.yPos)&&(turned == 0))
+				{
+					moveListAdd(turnRightMove);
+					turned = 1;
+				}
+			}
+			else
+			{
+				if(previousCell.xPos<workingCell.xPos)
+				{
+					moveListAdd(turnAroundMove);
+				}
+			}
+			break;
+	}
 }
 
 /***********************************************************************************
@@ -734,6 +797,7 @@ void genStartVector(void)
 {
 	//reset the fillVals so that past iterations of flood fill dont interfere
 	struct map workingCell;
+	workingCell = resetCell;
 	bool targetPosFound = 0;
 	resetFillVals();
 	
@@ -809,6 +873,7 @@ void genRunVector(void)
 {
 	//reset the fillVals so that past iterations of flood fill dont interfere
 	struct map workingCell;
+	workingCell = resetCell;
 	bool targetPosFound = 0;
 	resetFillVals();
 	
@@ -823,7 +888,7 @@ void genRunVector(void)
 		workingCell = floodListPop();
 		
 		//if the center square has been filled
-		if(MAP[8][8].fillVal != 0)
+		if(MAP[MAP_CENTER][MAP_CENTER].fillVal != 0)
 		{
 			targetPosFound = 1;
 		}
@@ -1069,13 +1134,13 @@ static void TIM1_Init(void)
 {
   //declares some structs for init purposes
   TIM_OC_InitTypeDef sConfigOC;
-	TIM_MasterConfigTypeDef sMasterConfig;
+	//TIM_MasterConfigTypeDef sMasterConfig;
   
 	//sets up the base timer 
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 1000;
+  htim1.Init.Period = 2000;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
 	htim1.Init.AutoReloadPreload = 1;
@@ -1255,17 +1320,14 @@ void moveListAdd(struct movementVector item)
 	}
 	else
 	{
-		moveList.sizeIndex++;
-		moveList.topIndex++;
-		//resets the index if it overflows
-		if(moveList.topIndex >= MOVE_LIST_SIZE)
-		{
-			moveList.topIndex = 0x00;
-		}
 		//saves new item to the list
-		moveList.list[moveList.topIndex] = item;
+		moveList.list[moveList.index] = item;
+		
+		//increments index
+		moveList.index++;
+		
 		//sets flags based on new size of list
-		if(moveList.sizeIndex == 0x00)
+		if(moveList.index == 0)
 		{
 			moveList.empty = true;
 		}
@@ -1273,7 +1335,7 @@ void moveListAdd(struct movementVector item)
 		{
 			moveList.empty = false;
 		}
-		if(moveList.sizeIndex == (MOVE_LIST_SIZE-1))
+		if(moveList.index == (MOVE_LIST_SIZE-1))
 		{
 			moveList.full = true;
 		}
@@ -1295,6 +1357,7 @@ Status     :
 struct map floodListPop(void)
 {
 	struct map Temp;
+	Temp = resetCell;
 	//enters error state if underflow occurs
 	if(floodList.empty == true)
 	{
@@ -1349,6 +1412,7 @@ Status     :
 struct movementVector moveListPop(void)
 {
 	struct movementVector Temp;
+	Temp = resetMove;
 	//enters error state if underflow occurs
 	if(moveList.empty == true)
 	{
@@ -1356,25 +1420,17 @@ struct movementVector moveListPop(void)
 	}
 	else
 	{
-		moveList.sizeIndex--;
-		moveList.bottomIndex++;
-		//resets the index if it overflows
-		if(moveList.bottomIndex >= MOVE_LIST_SIZE)
-		{
-			moveList.bottomIndex = 0x00;
-		}
+		//decrements the index
+		moveList.index--;
+		
 		//loads poped item to the external variable
-		Temp = moveList.list[moveList.bottomIndex];
+		Temp = moveList.list[moveList.index];
+		
 		//deletes poped item from the list
-		moveList.list[moveList.bottomIndex].pwmL1 = 0x00;
-		moveList.list[moveList.bottomIndex].pwmL2 = 0x00;
-		moveList.list[moveList.bottomIndex].pwmR1 = 0x00;
-		moveList.list[moveList.bottomIndex].pwmR2 = 0x00;
-		moveList.list[moveList.bottomIndex].leftMotorSteps = 0x00;
-		moveList.list[moveList.bottomIndex].rightMotorSteps = 0x00;
-		moveList.list[moveList.bottomIndex].moveType = noMove;
+		moveList.list[moveList.index] = resetMove;
+		
 		//sets flags based on new size of list
-		if(moveList.sizeIndex == 0x00)
+		if(moveList.index == 0x00)
 		{
 			moveList.empty = true;
 		}
@@ -1382,7 +1438,7 @@ struct movementVector moveListPop(void)
 		{
 			moveList.empty = false;
 		}
-		if(moveList.sizeIndex == (MOVE_LIST_SIZE-1))
+		if(moveList.index == (MOVE_LIST_SIZE-1))
 		{
 			moveList.full = true;
 		}
@@ -1605,6 +1661,114 @@ void EXTI9_5_IRQHandler(void)
 	__HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9);
   enCountLeft++;
 	HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_3);//for testing
+}
+
+/***********************************************************************************
+Functions  :  mapArrayInit
+Description:  writes startup values to the map array
+Inputs     :  None
+Outputs    :  None
+
+Status     :  Complete
+***********************************************************************************/
+void mapArrayInit(void)
+{
+	for(int i = 0;i<MAP_SIZE;i++)
+	{
+		for(int j = 0;j<MAP_SIZE;j++)
+		{
+			MAP[i][j] = resetCell;
+			MAP[i][j].xPos = i;
+			MAP[i][j].yPos = j;
+		}
+	}
+}
+
+/***********************************************************************************
+Functions  :  ListStructInit
+Description:  writes startup values to the list structures 
+Inputs     :  None
+Outputs    :  None
+
+Status     :  Complete
+***********************************************************************************/
+void listStructInit(void)
+{
+	for(int i = 0;i < FLOOD_LIST_SIZE;i++)
+	{
+		floodList.list[i] = resetCell;
+	}
+	floodList.topIndex = 0;
+	floodList.bottomIndex = 0;
+	floodList.sizeIndex = 0;
+	floodList.empty = true;
+	floodList.full = false;
+
+	for(int i = 0;i < MOVE_LIST_SIZE;i++)
+	{
+		moveList.list[i] = resetMove;
+	}
+	moveList.index = 0;
+	moveList.empty = true;
+	moveList.full = false;
+	
+}
+
+/***********************************************************************************
+Functions  :  StructInit
+Description:  writes startup values to constant structs 
+Inputs     :  None
+Outputs    :  None
+
+Status     :  Complete
+***********************************************************************************/
+void StructInit(void)
+{
+	forwardMove.pwmL1 = 2000;
+	forwardMove.pwmL2 = BASE_SPEED;
+	forwardMove.pwmR1 = BASE_SPEED-speedTuneR;
+	forwardMove.pwmR2 = 2000;
+	forwardMove.leftMotorSteps = ONE_SQUARE;
+	forwardMove.rightMotorSteps = ONE_SQUARE;
+	forwardMove.moveType = forward;
+	
+	turnRightMove.pwmL1 = 2000;
+	turnRightMove.pwmL2 = BASE_SPEED;
+	turnRightMove.pwmR1 = 2000;
+	turnRightMove.pwmR2 = BASE_SPEED-speedTuneR;
+	turnRightMove.leftMotorSteps = TURN_90;
+	turnRightMove.rightMotorSteps = TURN_90;
+	turnRightMove.moveType = turnRight;
+	
+	turnLeftMove.pwmL1 = BASE_SPEED;
+	turnLeftMove.pwmL2 = 2000;
+	turnLeftMove.pwmR1 = BASE_SPEED-speedTuneR;
+	turnLeftMove.pwmR2 = 2000;
+	turnLeftMove.leftMotorSteps = TURN_90;
+	turnLeftMove.rightMotorSteps = TURN_90;
+	turnLeftMove.moveType = turnLeft;
+	
+	turnAroundMove.pwmL1 = 2000;
+	turnAroundMove.pwmL2 = BASE_SPEED;
+	turnAroundMove.pwmR1 = 2000;
+	turnAroundMove.pwmR2 = BASE_SPEED-speedTuneR;
+	turnAroundMove.leftMotorSteps = TURN_AROUND;
+	turnAroundMove.rightMotorSteps = TURN_AROUND;
+	turnAroundMove.moveType = turnAround;
+	
+	resetMove.pwmL1 = 0;
+	resetMove.pwmL2 = 0;
+	resetMove.pwmR1 = 0;
+	resetMove.pwmR2 = 0;
+	resetMove.leftMotorSteps = 0;
+	resetMove.rightMotorSteps = 0;
+	resetMove.moveType = noMove;
+	
+	resetCell.fillVal = 0;
+	resetCell.scanned = 0;
+	resetCell.walls = 0;
+	resetCell.xPos = 0;
+	resetCell.yPos = 0;
 }
 
 /***********************************************************************************
