@@ -14,20 +14,23 @@
 #define MAP_CENTER 3
 #define MOVE_LIST_SIZE 500
 #define FLOOD_LIST_SIZE 100
-#define WALL_THRESHOLD_S 1000
-#define WALL_THRESHOLD_L 3000
-#define ONE_SQUARE 1550
-#define TURN_90 560
-#define TURN_AROUND 1120
+#define KP 5
+#define WALL_SETPOINT_L 1500
+#define WALL_SETPOINT_R 1450
+#define WALL_THRESHOLD 550
+#define ONE_SQUARE 1520
+#define TURN_90 550
+#define TURN_AROUND 1080
 #define NORTH 0x0
 #define EAST 0x1
 #define SOUTH 0x2
 #define WEST 0x3
 
+#define PWM_PULSE 2000
 #define BASE_SPEED 1600
 
 ADC_HandleTypeDef hadc1;
-TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim1, htim2;
 
 static uint32_t start, end=0; // for testing, delete later
 
@@ -93,6 +96,7 @@ static struct movementVector forwardMove;
 static struct movementVector turnRightMove;
 static struct movementVector turnLeftMove;
 static struct movementVector turnAroundMove;
+static struct movementVector handleItMove;
 
 static struct FloodList floodList;
 static struct MoveList moveList;
@@ -112,6 +116,7 @@ void SystemClock_Config(void);
 static void GPIO_Init(void);
 static void ADC1_Init(void);
 static void TIM1_Init(void);
+static void TIM2_Init(void);
 static void EXTI_Init(void);
 
 static void StructInit(void);
@@ -131,7 +136,7 @@ static void mapCell(void);
 static int checkMapComplete(void);
 static void analogRead(void);
 static void resetEnCounts(void);
-static void setMotorMove(struct movementVector);
+static void setMotorMove(struct movementVector, int);
 static void stopMotorMove(void);
 static void setNewPos(enum Movement);
 
@@ -157,6 +162,7 @@ int main(void)
   GPIO_Init();
   ADC1_Init();
   TIM1_Init();
+	TIM2_Init();
 	EXTI_Init();
 	
 	StructInit();
@@ -164,7 +170,7 @@ int main(void)
 	listStructInit();
 	
 	stopMotorMove();
-	TEST();
+	//TEST();
 
 	if((GPIOB->IDR&0x80) == 0x80)
 	{
@@ -185,7 +191,8 @@ int main(void)
 	while(1)
 	{
 		//MAPPING MODE 00
-		while((GPIOB->IDR&0xC0) == 0x00) 
+		//while((GPIOB->IDR&0xC0) == 0x00) 
+		while(1)
 		{
 			mapCell();
 			genMoveVector();
@@ -237,8 +244,8 @@ void TEST(void)
 	while(1)
 	{
 		moveListAdd(turnAroundMove);
-		exeMoveVector();
 		waitForButton();
+		exeMoveVector();
 	}
 }
 
@@ -282,68 +289,87 @@ Status     :  Doesn't populate walls in adjacent cells, may not be an issue... P
 ***********************************************************************************/
 void mapCell(void)
 {
-
-	if(MAP[currentXpos][currentYpos].scanned == 0) //if current map position has not been mapped
-	{ 
-		MAP[currentXpos][currentYpos].scanned = 1;
-		analogRead();
+	//if current map position has not been scanned, do the thing
+	if(MAP[currentXpos][currentYpos].scanned == 0)
+	{  
+		//update IR sensor readings 
+		analogRead(); 
+		//based on current uMouse direction, do the thing
 		switch(direction) 
 		{
 			case NORTH:
-				if(analog1.middleIRVal>=WALL_THRESHOLD_S)
+				//if IR indicates wall to the north, do the thing
+				if(analog1.middleIRVal>=WALL_THRESHOLD)
 				{
-					MAP[currentXpos][currentYpos].walls|=0x08;
+					MAP[currentXpos][currentYpos].walls|=0x08; //maps wall north
 				}
-				if(analog1.leftFrontIRVal>=WALL_THRESHOLD_S) 
+				//if IR indicates wall to the west, do the thing
+				if(analog1.leftFrontIRVal>=WALL_THRESHOLD) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x01;
+					MAP[currentXpos][currentYpos].walls|=0x01; //maps wall west
 				}
-				if(analog1.rightFrontIRVal>=WALL_THRESHOLD_S) 
+				//if IR indicates wall to the east, do the thing
+				if(analog1.rightFrontIRVal>=WALL_THRESHOLD) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x04;
+					MAP[currentXpos][currentYpos].walls|=0x04; //maps wall east
 				}
+				MAP[currentXpos][currentYpos].scanned = 1; //marks cell as scanned
 				break;
 			case WEST:
-				if(analog1.middleIRVal>=WALL_THRESHOLD_S) 
+				//if IR indicates wall to the west, do the thing
+				if(analog1.middleIRVal>=WALL_THRESHOLD) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x01;
+					MAP[currentXpos][currentYpos].walls|=0x01; //maps wall west
 				}
-				if(analog1.leftFrontIRVal>=WALL_THRESHOLD_S) 
+				//if IR indicates wall to the south, do the thing
+				if(analog1.leftFrontIRVal>=WALL_THRESHOLD) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x02;
+					MAP[currentXpos][currentYpos].walls|=0x02; //maps wall south
 				}
-				if(analog1.rightFrontIRVal>=WALL_THRESHOLD_S) 
+				//if IR indicates wall to the north, do the thing
+				if(analog1.rightFrontIRVal>=WALL_THRESHOLD) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x08;
+					MAP[currentXpos][currentYpos].walls|=0x08; //maps wall north
 				}
+				MAP[currentXpos][currentYpos].scanned = 1; //marks cell as scanned
 				break;
 			case SOUTH:
-				if(analog1.middleIRVal>=WALL_THRESHOLD_S) 
+				//if IR indicates wall to the south, do the thing
+				if(analog1.middleIRVal>=WALL_THRESHOLD) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x02;
+					MAP[currentXpos][currentYpos].walls|=0x02; //maps wall south
 				}
-				if(analog1.leftFrontIRVal>=WALL_THRESHOLD_S) 
+				//if IR indicates wall to the east, do the thing
+				if(analog1.leftFrontIRVal>=WALL_THRESHOLD) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x04;
+					MAP[currentXpos][currentYpos].walls|=0x04; //maps wall east
 				}
-				if(analog1.rightFrontIRVal>=WALL_THRESHOLD_S) 
+				//if IR indicates wall to the west, do the thing
+				if(analog1.rightFrontIRVal>=WALL_THRESHOLD) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x01;
+					MAP[currentXpos][currentYpos].walls|=0x01; //maps wall west
 				}
+				MAP[currentXpos][currentYpos].scanned = 1; //marks cell as scanned
 				break;
 			case EAST:
-				if(analog1.middleIRVal>=WALL_THRESHOLD_S) 
+				//if IR indicates wall to the east, do the thing
+				if(analog1.middleIRVal>=WALL_THRESHOLD) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x04;
+					MAP[currentXpos][currentYpos].walls|=0x04; //maps wall east
 				}
-				if(analog1.leftFrontIRVal>=WALL_THRESHOLD_S) 
+				//if IR indicates wall to the north, do the thing
+				if(analog1.leftFrontIRVal>=WALL_THRESHOLD) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x08;
+					MAP[currentXpos][currentYpos].walls|=0x08; //maps wall north
 				}
-				if(analog1.rightFrontIRVal>=WALL_THRESHOLD_S) 
+				//if IR indicates wall to the south, do the thing
+				if(analog1.rightFrontIRVal>=WALL_THRESHOLD) 
 				{
-					MAP[currentXpos][currentYpos].walls|=0x02;
+					MAP[currentXpos][currentYpos].walls|=0x02; // maps wall south
 				}
+				MAP[currentXpos][currentYpos].scanned = 1; //marks cell as scanned
+				break;
+			default:
 				break;
 		}
 	}
@@ -366,7 +392,7 @@ void waitForButton(void)
 		//empty on purpose
 	}
 	//delay for final adjustments
-	HAL_Delay(3000);
+	HAL_Delay(1000);
 }
 
 /***********************************************************************************
@@ -379,38 +405,79 @@ Status     :  Complete, tested
 ***********************************************************************************/
 void exeMoveVector(void)
 {
-	struct movementVector currentMove;
-	currentMove = resetMove;
+	handleItMove = resetMove;
 	
 	//Repeats while there is still movements on the stack to be executed
 	while(moveList.empty == false)
 	{
-		currentMove = moveListPop();      //gets the next movement to execute
-		rightMotorFinish = 0;             //clears movement complete flags
+		handleItMove = moveListPop();      //gets the next movement to execute
+		rightMotorFinish = 0;              //clears movement complete flags
 		leftMotorFinish = 0;
 		resetEnCounts();
-		setMotorMove(currentMove);        //sets the PWMs for the movement
-		setNewPos(currentMove.moveType);  //sets the position of the uM to the destination
+		setMotorMove(handleItMove,0);      //sets the PWMs for the movement
+		setNewPos(handleItMove.moveType);  //sets the position of the uM to the destination
+		
+		//starts the timer
+		HAL_TIM_Base_Start(&htim2);        //runs the PID correction in the TIM2Handler()
 		
 		//loops until the movement has completed
 		while((rightMotorFinish == 0)&&(leftMotorFinish == 0))
 		{
-			///////////////////////////////////////////////
-			//movement control system 
-			///////////////////////////////////////////////
+			if(handleItMove.moveType == forward)
+			{
+				if((TIM2->SR&0x1)==0x1)
+				{
+					TIM2->SR = TIM2->SR&0xFFFE;
+					analogRead();
+					//PID Calc stuff
+					int PID = 0;
+					int error = 0;
+					
+					//if both walls
+					if ((analog1.leftFrontIRVal > WALL_THRESHOLD) && (analog1.rightFrontIRVal > WALL_THRESHOLD))
+					{
+						error = analog1.leftFrontIRVal - analog1.rightFrontIRVal;
+						PID = error/KP;
+					}
+					//if left wall
+					else if (analog1.leftFrontIRVal > WALL_THRESHOLD)
+					{
+						error = analog1.leftFrontIRVal - WALL_SETPOINT_L;
+						PID = error/KP;
+					}
+					//if right wall
+					else if (analog1.rightFrontIRVal > WALL_THRESHOLD)
+					{
+						error = WALL_SETPOINT_R - analog1.rightFrontIRVal;
+						PID = error/KP;
+					}
+					//if no walls
+					else
+					{
+						PID = 0;
+					}
+						
+					setMotorMove(handleItMove,PID);
+				}
+			}
 			
 			//checks to see if the movement is done
-			if(currentMove.rightMotorSteps<=enCountRight)
+			if(handleItMove.rightMotorSteps<=enCountRight)
 			{
 				rightMotorFinish = 1;
 			}
-			if(currentMove.leftMotorSteps<=enCountLeft)
+			if(handleItMove.leftMotorSteps<=enCountLeft)
 			{
 				leftMotorFinish = 1;
 			}
 		}
+		// turns off timer2 to stop generating PID corrections
+		HAL_TIM_Base_Stop(&htim2);
+		//breaks the motors
 		stopMotorMove();
 	}
+	//pauses to show clear breaks between movement lists for testing
+	HAL_Delay(1000);
 }
 
 /***********************************************************************************
@@ -435,30 +502,108 @@ Outputs    :  None
 
 Status     :  Complete, tested
 ***********************************************************************************/
-void setMotorMove(struct movementVector move)
+void setMotorMove(struct movementVector move, int PIDadjust)
 {
 	TIM_OC_InitTypeDef sConfigOC;
+	//based on the movement type, do the thing
+	switch(move.moveType)
+	{
+		case forward:
+			sConfigOC.OCMode = TIM_OCMODE_PWM1;
+			sConfigOC.Pulse = move.pwmL1;
+			sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+			sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+			sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+			sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+			sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1);
+			sConfigOC.Pulse = move.pwmR1+PIDadjust;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
+			sConfigOC.Pulse = move.pwmR2;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
+			sConfigOC.Pulse = move.pwmL2;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
+			
+			HAL_TIM_Base_Start(&htim1);
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1); 
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); 
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_3); 
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_4); 
+			break;
+		
+		case turnRight:
+			sConfigOC.OCMode = TIM_OCMODE_PWM1;
+			sConfigOC.Pulse = move.pwmL1;
+			sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+			sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+			sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+			sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+			sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1);
+			sConfigOC.Pulse = move.pwmR1;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
+			sConfigOC.Pulse = move.pwmR2+PIDadjust;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
+			sConfigOC.Pulse = move.pwmL2;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
+			
+			HAL_TIM_Base_Start(&htim1);
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1); 
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); 
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_3); 
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_4);
+			break;
+		
+		case turnLeft:
+			sConfigOC.OCMode = TIM_OCMODE_PWM1;
+			sConfigOC.Pulse = move.pwmL1;
+			sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+			sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+			sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+			sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+			sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1);
+			sConfigOC.Pulse = move.pwmR1+PIDadjust;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
+			sConfigOC.Pulse = move.pwmR2;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
+			sConfigOC.Pulse = move.pwmL2;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
+			
+			HAL_TIM_Base_Start(&htim1);
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1); 
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); 
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_3); 
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_4);
+			break;
+		
+		case turnAround:
+			sConfigOC.OCMode = TIM_OCMODE_PWM1;
+			sConfigOC.Pulse = move.pwmL1;
+			sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+			sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+			sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+			sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+			sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1);
+			sConfigOC.Pulse = move.pwmR1;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
+			sConfigOC.Pulse = move.pwmR2+PIDadjust;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
+			sConfigOC.Pulse = move.pwmL2;
+			HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
+			
+			HAL_TIM_Base_Start(&htim1);
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1); 
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); 
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_3); 
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_4);
+			break;
+		
+		default:
+			break;
+		}
 	
-	sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = move.pwmL1;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
-  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
-  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1);
-	sConfigOC.Pulse = move.pwmR1;
-  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
-	sConfigOC.Pulse = move.pwmR2;
-  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
-	sConfigOC.Pulse = move.pwmL2;
-  HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
-	
-	HAL_TIM_Base_Start(&htim1);
-	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1); 
-	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); 
-	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_3); 
-	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_4); 
 }
 
 /***********************************************************************************
@@ -532,7 +677,7 @@ void genMoveVector(void)
 	targetCell = resetCell;
 	previousCell = resetCell;
 	bool targetPosFound = 0;
-	bool turned = 0;
+	listStructInit();
 	resetFillVals();
 	
 	//load current position as the starting point and set fillVal
@@ -592,27 +737,25 @@ void genMoveVector(void)
 			}	
 		}
 	}
-	workingCell = targetCell;
+	workingCell = targetCell;//bug: not needed?
 	
 	//fills the moveStack with The steps needed to get to the target cell
 	for(int i = 0x8000;i<targetCell.fillVal;i++)
 	{
-		//next cell West
+		//next cell West (bug: can request fillval of cell outside array)
 		if(MAP[workingCell.xPos-1][workingCell.yPos].fillVal == (workingCell.fillVal-1))
 		{
 			if(previousCell.fillVal != 0)
 			{
 				if(previousCell.xPos == workingCell.xPos)
 				{
-					if((previousCell.yPos>workingCell.yPos)&&(turned == 0))
+					if(previousCell.yPos>workingCell.yPos)
 					{
 						moveListAdd(turnLeftMove);
-						turned = 1;
 					}
-					if((previousCell.yPos<workingCell.yPos)&&(turned == 0))
+					else if(previousCell.yPos<workingCell.yPos)
 					{
 						moveListAdd(turnRightMove);
-						turned = 1;
 					}
 				}
 			}
@@ -627,15 +770,13 @@ void genMoveVector(void)
 			{
 				if(previousCell.xPos == workingCell.xPos)
 				{
-					if((previousCell.yPos>workingCell.yPos)&&(turned == 0))
+					if(previousCell.yPos>workingCell.yPos)
 					{
 						moveListAdd(turnRightMove);
-						turned = 1;
 					}
-					if((previousCell.yPos<workingCell.yPos)&&(turned == 0))
+					else if(previousCell.yPos<workingCell.yPos)
 					{
 						moveListAdd(turnLeftMove);
-						turned = 1;
 					}
 				}
 			}
@@ -650,21 +791,20 @@ void genMoveVector(void)
 			{
 				if(previousCell.yPos == workingCell.yPos)
 				{
-					if((previousCell.xPos>workingCell.xPos)&&(turned == 0))
-					{
-						moveListAdd(turnLeftMove);
-						turned = 1;
-					}
-					if((previousCell.xPos<workingCell.xPos)&&(turned == 0))
+					if(previousCell.xPos>workingCell.xPos)
 					{
 						moveListAdd(turnRightMove);
-						turned = 1;
+					}
+					else if(previousCell.xPos<workingCell.xPos)
+					{
+						moveListAdd(turnLeftMove);
 					}
 				}
 			}
 			moveListAdd(forwardMove);
 			previousCell = workingCell;
 			workingCell = MAP[workingCell.xPos][workingCell.yPos-1];
+			//bug: working cell is changed and still looks at walls in the next case
 		}
 		//next cell North
 		if(MAP[workingCell.xPos][workingCell.yPos+1].fillVal == (workingCell.fillVal-1))
@@ -673,15 +813,13 @@ void genMoveVector(void)
 			{
 				if(previousCell.yPos == workingCell.yPos)
 				{
-					if((previousCell.xPos>workingCell.xPos)&&(turned == 0))
-					{
-						moveListAdd(turnRightMove);
-						turned = 1;
-					}
-					if((previousCell.xPos<workingCell.xPos)&&(turned == 0))
+					if(previousCell.xPos>workingCell.xPos)
 					{
 						moveListAdd(turnLeftMove);
-						turned = 1;
+					}
+					else if(previousCell.xPos<workingCell.xPos)
+					{
+						moveListAdd(turnRightMove);
 					}
 				}
 			}
@@ -689,7 +827,6 @@ void genMoveVector(void)
 			previousCell = workingCell;
 			workingCell = MAP[workingCell.xPos][workingCell.yPos+1];
 		}
-		turned = 0;
 	}
 	//initial direction of uMouse compensation
 	switch(direction)
@@ -697,15 +834,13 @@ void genMoveVector(void)
 		case NORTH:
 			if(previousCell.yPos == workingCell.yPos)
 			{
-				if((previousCell.xPos>workingCell.xPos)&&(turned == 0))
+				if(previousCell.xPos>workingCell.xPos)
 				{
 					moveListAdd(turnRightMove);
-					turned = 1;
 				}
-				if((previousCell.xPos<workingCell.xPos)&&(turned == 0))
+				else if(previousCell.xPos<workingCell.xPos)
 				{
 					moveListAdd(turnLeftMove);
-					turned = 1;
 				}
 			}
 			else 
@@ -719,20 +854,18 @@ void genMoveVector(void)
 		case EAST:
 			if(previousCell.xPos == workingCell.xPos)
 			{
-				if((previousCell.yPos>workingCell.yPos)&&(turned == 0))
-				{
-					moveListAdd(turnRightMove);
-					turned = 1;
-				}
-				if((previousCell.yPos<workingCell.yPos)&&(turned == 0))
+				if(previousCell.yPos>workingCell.yPos)
 				{
 					moveListAdd(turnLeftMove);
-					turned = 1;
+				}
+				else if(previousCell.yPos<workingCell.yPos)
+				{
+					moveListAdd(turnRightMove);
 				}
 			}
 			else
 			{
-				if(previousCell.xPos>workingCell.xPos)
+				if(previousCell.xPos<workingCell.xPos)
 				{
 					moveListAdd(turnAroundMove);
 				}
@@ -741,15 +874,13 @@ void genMoveVector(void)
 		case SOUTH:
 			if(previousCell.yPos == workingCell.yPos)
 			{
-				if((previousCell.xPos>workingCell.xPos)&&(turned == 0))
+				if(previousCell.xPos>workingCell.xPos)
 				{
 					moveListAdd(turnLeftMove);
-					turned = 1;
 				}
-				if((previousCell.xPos<workingCell.xPos)&&(turned == 0))
+				else if(previousCell.xPos<workingCell.xPos)
 				{
 					moveListAdd(turnRightMove);
-					turned = 1;
 				}
 			}
 			else
@@ -763,20 +894,18 @@ void genMoveVector(void)
 		case WEST:
 			if(previousCell.xPos == workingCell.xPos)
 			{
-				if((previousCell.yPos>workingCell.yPos)&&(turned == 0))
-				{
-					moveListAdd(turnLeftMove);
-					turned = 1;
-				}
-				if((previousCell.yPos<workingCell.yPos)&&(turned == 0))
+				if(previousCell.yPos>workingCell.yPos)
 				{
 					moveListAdd(turnRightMove);
-					turned = 1;
+				}
+				else if(previousCell.yPos<workingCell.yPos)
+				{
+					moveListAdd(turnLeftMove);
 				}
 			}
 			else
 			{
-				if(previousCell.xPos<workingCell.xPos)
+				if(previousCell.xPos>workingCell.xPos)
 				{
 					moveListAdd(turnAroundMove);
 				}
@@ -955,13 +1084,13 @@ void setNewPos(enum Movement move)
 				currentYpos++;
 				break;
 			case WEST:
-				currentXpos++;
+				currentXpos--;
 				break;
 			case SOUTH:
 				currentYpos--;
 				break;
 			case EAST:
-				currentXpos--;
+				currentXpos++;
 				break;
 		}
 	}
@@ -1017,7 +1146,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSI;
   RCC_OscInitStruct.MSIState = RCC_MSI_ON;
   RCC_OscInitStruct.MSICalibrationValue = 0;
-  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
+  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_8;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
   HAL_RCC_OscConfig(&RCC_OscInitStruct);
 
@@ -1134,13 +1263,14 @@ static void TIM1_Init(void)
 {
   //declares some structs for init purposes
   TIM_OC_InitTypeDef sConfigOC;
-	//TIM_MasterConfigTypeDef sMasterConfig;
+	
+	__HAL_RCC_TIM1_CLK_ENABLE();
   
 	//sets up the base timer 
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 2000;
+  htim1.Init.Period = PWM_PULSE;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
 	htim1.Init.AutoReloadPreload = 1;
@@ -1165,6 +1295,31 @@ static void TIM1_Init(void)
 	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); 
 	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_3); 
 	HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_4); 
+}
+
+/***********************************************************************************
+Function   :  TIM2_Init()
+Description:  Configure Timer 1 to run 4 PWM outputs for the motors
+Inputs     :  None
+Outputs    :  None
+
+Status     :  Complete
+***********************************************************************************/
+static void TIM2_Init(void)
+{
+	
+	__HAL_RCC_TIM2_CLK_ENABLE();
+	
+	//sets up the base timer 
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 30000;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV4;
+  htim2.Init.RepetitionCounter = 0;
+	htim2.Init.AutoReloadPreload = 1;
+  HAL_TIM_Base_Init(&htim2);
+
 }
 
 /***********************************************************************************
@@ -1231,7 +1386,7 @@ static void GPIO_Init(void)
 	/*Configure GPIO pins : PA8 PA9 PA10 PA11 */
 	GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10|GPIO_PIN_11;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
 	GPIO_InitStruct.Alternate = GPIO_AF1_TIM1;
 	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
@@ -1724,33 +1879,33 @@ Status     :  Complete
 ***********************************************************************************/
 void StructInit(void)
 {
-	forwardMove.pwmL1 = 2000;
+	forwardMove.pwmL1 = PWM_PULSE;
 	forwardMove.pwmL2 = BASE_SPEED;
 	forwardMove.pwmR1 = BASE_SPEED-speedTuneR;
-	forwardMove.pwmR2 = 2000;
+	forwardMove.pwmR2 = PWM_PULSE;
 	forwardMove.leftMotorSteps = ONE_SQUARE;
 	forwardMove.rightMotorSteps = ONE_SQUARE;
 	forwardMove.moveType = forward;
 	
-	turnRightMove.pwmL1 = 2000;
+	turnRightMove.pwmL1 = PWM_PULSE;
 	turnRightMove.pwmL2 = BASE_SPEED;
-	turnRightMove.pwmR1 = 2000;
+	turnRightMove.pwmR1 = PWM_PULSE;
 	turnRightMove.pwmR2 = BASE_SPEED-speedTuneR;
 	turnRightMove.leftMotorSteps = TURN_90;
 	turnRightMove.rightMotorSteps = TURN_90;
 	turnRightMove.moveType = turnRight;
 	
 	turnLeftMove.pwmL1 = BASE_SPEED;
-	turnLeftMove.pwmL2 = 2000;
+	turnLeftMove.pwmL2 = PWM_PULSE;
 	turnLeftMove.pwmR1 = BASE_SPEED-speedTuneR;
-	turnLeftMove.pwmR2 = 2000;
+	turnLeftMove.pwmR2 = PWM_PULSE;
 	turnLeftMove.leftMotorSteps = TURN_90;
 	turnLeftMove.rightMotorSteps = TURN_90;
 	turnLeftMove.moveType = turnLeft;
 	
-	turnAroundMove.pwmL1 = 2000;
+	turnAroundMove.pwmL1 = PWM_PULSE;
 	turnAroundMove.pwmL2 = BASE_SPEED;
-	turnAroundMove.pwmR1 = 2000;
+	turnAroundMove.pwmR1 = PWM_PULSE;
 	turnAroundMove.pwmR2 = BASE_SPEED-speedTuneR;
 	turnAroundMove.leftMotorSteps = TURN_AROUND;
 	turnAroundMove.rightMotorSteps = TURN_AROUND;
@@ -1770,6 +1925,16 @@ void StructInit(void)
 	resetCell.xPos = 0;
 	resetCell.yPos = 0;
 }
+
+/***********************************************************************************
+Functions  :  TIM2_IRQHandler
+Description:  does timer things
+Inputs     :  None
+Outputs    :  None
+
+Status     :  Complete
+***********************************************************************************/
+
 
 /***********************************************************************************
 Functions  :  manHandler
