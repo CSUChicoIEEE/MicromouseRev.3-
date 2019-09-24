@@ -30,8 +30,8 @@ PINOUT FOR THE STM32L432KC EVAL BOARD
 *******************************************************
 # :NAME         :CURRENT USE              :TEST BENCH
 *******************************************************
-1 :PA9          :PWM motor A1
-2 :PA10         :PWM motor A2
+1 :PA9          :PWM motor A1 (Right Backwards)
+2 :PA10         :PWM motor A2 (Right Forward)
 3 :RST          :
 4 :GND          :GND
 5 :PA12         :Button 1 input
@@ -41,8 +41,8 @@ PINOUT FOR THE STM32L432KC EVAL BOARD
 9 :PB1          :encoder right B input
 10:PC14         :
 11:PC15         :
-12:PA8          :PWM motor B1
-13:PA11         :PWM motor B2
+12:PA8          :PWM motor B1 (Left Forward)
+13:PA11         :PWM motor B2 (Left Backward)
 14:PB5          :encoder left B input
 15:PB4          :encoder left A input
 16:PB3          :
